@@ -1,6 +1,9 @@
 # Sega Saturn USB Flash Cart Transfer Utility
 
+
 This project provides a modern C++17 command-line utility for transferring data to and from a Sega Saturn USB flash cartridge. It supports downloading, uploading, and executing binaries on the device, with robust error handling, execution tracing, and cross-platform support via CMake.
+
+**Attribution:** This project is based on the original work by [andersm/usbcart](https://github.com/andersm/usbcart/tree/master/ftx).
 
 ## Features
 
