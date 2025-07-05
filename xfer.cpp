@@ -80,12 +80,6 @@ namespace xfer
      * @param pEndTime End time of transfer.
      * @param size Number of bytes transferred.
      */
-    /**
-     * @brief Print transfer performance statistics (cross-platform).
-     * @param start Start time point.
-     * @param end End time point.
-     * @param size Number of bytes transferred.
-     */
     void ReportPerformance(const std::chrono::steady_clock::time_point &start,
                            const std::chrono::steady_clock::time_point &end,
                            unsigned int size)
