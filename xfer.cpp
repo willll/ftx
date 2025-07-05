@@ -28,17 +28,16 @@
 */
 
 #include <ftdi.h>
-#include <sys/time.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
-#include <csignal>
-#include <unistd.h>
 #include <memory>
 #include <iostream>
-
 #include <iomanip>
+#include <chrono>
+#include <thread>
 
 #include "xfer.hpp"
 #include "crc.hpp"
@@ -81,18 +80,18 @@ namespace xfer
      * @param pEndTime End time of transfer.
      * @param size Number of bytes transferred.
      */
-    void ReportPerformance(const struct timeval *pStartTime,
-                           const struct timeval *pEndTime,
+    /**
+     * @brief Print transfer performance statistics (cross-platform).
+     * @param start Start time point.
+     * @param end End time point.
+     * @param size Number of bytes transferred.
+     */
+    void ReportPerformance(const std::chrono::steady_clock::time_point &start,
+                           const std::chrono::steady_clock::time_point &end,
                            unsigned int size)
     {
-        // Convert timeval to microseconds
-        auto to_us = [](const timeval *tv) -> long long
-        {
-            return static_cast<long long>(tv->tv_sec) * 1000000LL + static_cast<long long>(tv->tv_usec);
-        };
-        long long start_us = to_us(pStartTime);
-        long long end_us = to_us(pEndTime);
-        long long delta_us = end_us - start_us;
+        using namespace std::chrono;
+        auto delta_us = duration_cast<microseconds>(end - start).count();
         double seconds = delta_us / 1'000'000.0;
         double speed_kb_s = (size / 1024.0) / seconds;
         std::cout << "Transfer time: " << std::fixed << std::setprecision(3) << seconds << " s" << std::endl;
@@ -115,9 +114,7 @@ namespace xfer
         unsigned int received = 0;
         int status = -1;
         crc8::crc_t readChecksum = 0, calcChecksum = 0;
-        struct timeval before{}, after{};
-
-        gettimeofday(&before, nullptr);
+        auto before = std::chrono::steady_clock::now();
         std::cout << "[DoDownload] Sending download command..." << std::endl;
         status = xfer::SendCommandWithAddressAndLength(USBDC_FUNC_DOWNLOAD, address, size);
         if (status < 0)
@@ -151,9 +148,9 @@ namespace xfer
             }
         } while (status == 0);
 
-        gettimeofday(&after, nullptr);
+        auto after = std::chrono::steady_clock::now();
         std::cout << "[DoDownload] Data received. Calculating performance..." << std::endl;
-        xfer::ReportPerformance(&before, &after, size);
+        xfer::ReportPerformance(before, after, size);
 
         std::cout << "[DoDownload] Calculating CRC..." << std::endl;
         calcChecksum = crc8::crc_init();
@@ -219,8 +216,7 @@ namespace xfer
         checksum = crc8::crc_update(checksum, pFileBuffer.get(), size);
         checksum = crc8::crc_finalize(checksum);
 
-        struct timeval before{}, after{};
-        gettimeofday(&before, nullptr);
+        auto before = std::chrono::steady_clock::now();
         int status = xfer::SendCommandWithAddressAndLength(USBDC_FUNC_UPLOAD, address, size);
         if (status < 0)
         {
@@ -265,8 +261,8 @@ namespace xfer
             return 0;
         }
 
-        gettimeofday(&after, nullptr);
-        xfer::ReportPerformance(&before, &after, size);
+        auto after = std::chrono::steady_clock::now();
+        xfer::ReportPerformance(before, after, size);
         std::cout << "[DoUpload] Upload complete." << std::endl;
         return 1;
     }
@@ -434,6 +430,9 @@ namespace xfer
      * @brief Signal handler for clean exit on interrupt.
      * @param sig Signal number.
      */
-    void Signal(int sig) { exit(EXIT_FAILURE); }
+    void Signal(int sig)
+    {
+        std::exit(EXIT_FAILURE);
+    }
 
 } // namespace xfer
