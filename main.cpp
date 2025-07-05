@@ -1,0 +1,192 @@
+/*
+
+    Sega Saturn USB flash cart transfer utility
+    Copyright © 2012, 2013, 2015 Anders Montonen
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+    Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+    Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+    ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+    LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+    SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+    INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+    CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
+
+*/
+
+
+#include <iostream>
+#include <iomanip>
+#include <string>
+#include <csignal>
+
+#include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
+
+#include "xfer.hpp"
+
+
+
+const int VID = 0x0403;
+const int PID = 0x6001;
+
+/**
+ * @brief Print usage instructions for the CLI.
+ * @param progName Name of the program (argv[0]).
+ */
+void PrintUsage(const char* progName) {
+    // Use Boost.Filesystem to get the program name only
+    std::string prog = boost::filesystem::path(progName).filename().string();
+    std::cout << "Usage: " << prog << " [-options] [-commands]\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  -v  <VID>                     Device VID (Default 0x0403)\n";
+    std::cout << "  -p  <PID>                     Device PID (Default 0x6001)\n";
+    std::cout << "  -c                            Run debug console\n\n";
+    std::cout << "Commands:\n";
+    std::cout << "  -d  <file>  <address>  <size> Download data to file\n";
+    std::cout << "  -u  <file>  <address>         Upload data from file\n";
+    std::cout << "  -x  <file>  <address>         Upload program and execute\n";
+    std::cout << "  -r  <address>                 Execute program\n\n";
+    std::cout << "Examples:\n";
+    std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
+    std::cout << "  " << prog << " -u data.bin 0x200000\n";
+    std::cout << "  " << prog << " -x prog.bin 0x200000\n";
+    std::cout << "  " << prog << " -r 0x200000\n";
+    std::cout << "  " << prog << " -c\n";
+}
+
+/**
+ * @brief Struct to hold parsed command line arguments.
+ */
+struct CommandLineArgs {
+    int vid = VID; ///< USB Vendor ID
+    int pid = PID; ///< USB Product ID
+    bool console = false; ///< Run debug console
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN } command = NONE; ///< Command type
+    std::string filename; ///< File name for transfer
+    unsigned int address = 0; ///< Address for transfer/execute
+    unsigned int length = 0; ///< Length for download
+};
+
+/**
+ * @brief Parse command line arguments using Boost.Program_options.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Parsed CommandLineArgs struct.
+ */
+CommandLineArgs parse_args(int argc, char* argv[]) {
+    namespace po = boost::program_options;
+    CommandLineArgs args;
+    po::options_description desc("Allowed options");
+    desc.add_options()
+        ("v", po::value<std::string>(), "Device VID (hex) [optional]")
+        ("p", po::value<std::string>(), "Device PID (hex) [optional]")
+        ("c", "Run debug console")
+        ("d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
+        ("u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
+        ("x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
+        ("r", po::value<std::string>(), "Run: <address>");
+
+    po::variables_map vm;
+    try {
+        po::store(po::parse_command_line(argc, argv, desc), vm);
+        po::notify(vm);
+    } catch (const std::exception& e) {
+        std::cerr << "Error parsing command line: " << e.what() << std::endl;
+        std::cout << desc << std::endl;
+        exit(1);
+    }
+
+    if (vm.count("v")) {
+        args.vid = std::stoi(vm["v"].as<std::string>(), nullptr, 16);
+    }
+    if (vm.count("p")) {
+        args.pid = std::stoi(vm["p"].as<std::string>(), nullptr, 16);
+    }
+    if (vm.count("c")) {
+        args.console = true;
+    }
+    if (vm.count("d")) {
+        auto vals = vm["d"].as<std::vector<std::string>>();
+        if (vals.size() == 3) {
+            args.command = CommandLineArgs::DOWNLOAD;
+            args.filename = vals[0];
+            args.address = std::stoul(vals[1], nullptr, 0);
+            args.length = std::stoul(vals[2], nullptr, 0);
+        }
+    } else if (vm.count("u")) {
+        auto vals = vm["u"].as<std::vector<std::string>>();
+        if (vals.size() == 2) {
+            args.command = CommandLineArgs::UPLOAD;
+            args.filename = vals[0];
+            args.address = std::stoul(vals[1], nullptr, 0);
+        }
+    } else if (vm.count("x")) {
+        auto vals = vm["x"].as<std::vector<std::string>>();
+        if (vals.size() == 2) {
+            args.command = CommandLineArgs::EXEC;
+            args.filename = vals[0];
+            args.address = std::stoul(vals[1], nullptr, 0);
+        }
+    } else if (vm.count("r")) {
+        args.command = CommandLineArgs::RUN;
+        args.address = std::stoul(vm["r"].as<std::string>(), nullptr, 0);
+    }
+
+    return args;
+}
+
+/**
+ * @brief Main entry point for the Sega Saturn USB flash cart transfer utility.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Exit code.
+ */
+int main(int argc, char *argv[])
+{
+    CommandLineArgs args = parse_args(argc, argv);
+
+    if (args.command == CommandLineArgs::NONE && !args.console) {
+        PrintUsage(argv[0]);
+        return 1;
+    }
+
+    if (xfer::InitComms(args.vid, args.pid)) {
+        atexit(xfer::CloseComms);
+        signal(SIGINT, xfer::Signal);
+        switch (args.command) {
+            case CommandLineArgs::DOWNLOAD:
+                xfer::DoDownload(args.filename.c_str(), args.address, args.length);
+                break;
+            case CommandLineArgs::UPLOAD:
+                xfer::DoUpload(args.filename.c_str(), args.address);
+                break;
+            case CommandLineArgs::EXEC:
+                xfer::DoExecute(args.filename.c_str(), args.address);
+                break;
+            case CommandLineArgs::RUN:
+                xfer::DoRun(args.address);
+                break;
+            default:
+                break;
+        }
+        if (args.console) {
+            xfer::DoConsole();
+        }
+    }
+ 
+    return 0;
+}
