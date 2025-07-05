@@ -1,0 +1,4 @@
+# Suppressions for cppcheck
+# Add one suppression per line. See cppcheck manual for syntax.
+
+missingIncludeSystem

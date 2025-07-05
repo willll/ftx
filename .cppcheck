@@ -1,0 +1,28 @@
+# cppcheck configuration for Google C++ Style
+# Place this file as .cppcheck in your project root
+
+# Enable all checks, including style
+enable=all
+
+# Suppressions for third-party or generated code (edit as needed)
+suppress=missingIncludeSystem
+
+
+# Google C++ style guideline (partial support)
+# Note: cppcheck does not natively enforce Google style, but '--library=google' enables some checks if the google.cfg file is available.
+# If you do not have google.cfg, omit '--library=google'.
+#
+# Recommended usage (from project root, after building with CMake):
+#   cppcheck --enable=all --project=build/compile_commands.json
+# Or, if you have google.cfg:
+#   cppcheck --library=google --enable=all --project=build/compile_commands.json
+
+
+# Exclude build and external directories
+-i build
+-i external
+
+# Set language standard
+std=c++17
+
+# Additional options can be set via command line or here
