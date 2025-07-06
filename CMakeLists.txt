@@ -16,7 +16,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
 
 add_executable(ftx
-  src/main.cpp
+  src/ftx.cpp
   src/xfer.cpp
   src/crc.cpp
 )
