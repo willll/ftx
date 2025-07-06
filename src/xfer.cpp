@@ -41,6 +41,7 @@
 
 #include "xfer.hpp"
 #include "crc.hpp"
+#include "saturn.hpp"
 
 #include "sc_common.h"
 
@@ -58,7 +59,7 @@ namespace xfer
      * @param size Data size.
      * @return Number of bytes written, or negative on error.
      */
-    int SendCommandWithAddressAndLength(unsigned int cmd, unsigned int address,
+    int SendCommandWithAddressAndLength(unsigned int cmd, uint32_t address,
                                         unsigned int size)
     {
         uint8_t i = 0;
@@ -104,6 +105,13 @@ namespace xfer
         std::cout << "Transfer speed: " << std::fixed << std::setprecision(2) << speed_kb_s << " KB/s" << std::endl;
     }
 
+    int DoBiosDump(const char *filename)
+    {
+        std::cout << "[DoBiosDump] Starting BIOS dump to file: " << filename << std::endl;
+        return DoDownload(filename, saturn::bios_address, saturn::bios_size);
+    }
+    
+
     // Placeholders for the actual implementations:
     /**
      * @brief Download data from device and write to file.
@@ -112,12 +120,12 @@ namespace xfer
      * @param size Number of bytes to download.
      * @return 1 on success, 0 on error.
      */
-    int DoDownload(const char *filename, unsigned int address, unsigned int size)
+    int DoDownload(const char *filename, uint32_t address, std::size_t size)
     {
         std::cout << "[DoDownload] Starting download: file='" << filename << "', address=0x" << std::hex << address << ", size=" << std::dec << size << std::endl;
         std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[size]);
         FILE *File = nullptr;
-        unsigned int received = 0;
+        std::size_t received = 0;
         int status = -1;
         crc8::crc_t readChecksum = 0, calcChecksum = 0;
         auto before = std::chrono::steady_clock::now();
@@ -187,7 +195,7 @@ namespace xfer
      * @param address Device address to write to.
      * @return 1 on success, 0 on error.
      */
-    int DoUpload(const char *filename, unsigned int address, const bool execute)
+    int DoUpload(const char *filename, uint32_t address, const bool execute)
     {
         std::string functnName = execute ? "DoUploadExecute" : "DoUpload";
 
@@ -288,7 +296,7 @@ namespace xfer
      * @param address Address to execute.
      * @return 1 on success, 0 on error.
      */
-    int DoRun(unsigned int address)
+    int DoRun(uint32_t address)
     {
         std::cout << "[DoRun] Executing at address 0x" << std::hex << address << std::dec << std::endl;
         SendBuf[0] = USBDC_FUNC_EXEC;
@@ -312,7 +320,7 @@ namespace xfer
      * @param address Address to execute.
      * @return 1 on success, 0 on error.
      */
-    int DoExecute(const char *filename, unsigned int address)
+    int DoExecute(const char * filename, uint32_t address)
     {
         std::cout << "[DoExecute] Uploading and executing: file='" << filename << "', address=0x" << std::hex << address << std::dec << std::endl;
         int status = 0;

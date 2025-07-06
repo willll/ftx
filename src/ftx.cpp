@@ -54,12 +54,14 @@ void PrintUsage(const char* progName) {
     std::cout << "Options:\n";
     std::cout << "  -v  <VID>                     Device VID (Default 0x0403)\n";
     std::cout << "  -p  <PID>                     Device PID (Default 0x6001)\n";
-    std::cout << "  -c                            Run debug console\n\n";
+    std::cout << "  -c                            Run debug console\n";
+    std::cout << "  -help                         Help\n\n";
     std::cout << "Commands:\n";
     std::cout << "  -d  <file>  <address>  <size> Download data to file\n";
     std::cout << "  -u  <file>  <address>         Upload data from file\n";
     std::cout << "  -x  <file>  <address>         Upload program and execute\n";
-    std::cout << "  -r  <address>                 Execute program\n\n";
+    std::cout << "  -r  <address>                 Execute program (Does not work !)\n";
+    std::cout << "  -dump  <file>                 Dump BIOS to file\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
     std::cout << "  " << prog << " -u data.bin 0x200000\n";
@@ -75,7 +77,7 @@ struct CommandLineArgs {
     int vid = VID; ///< USB Vendor ID
     int pid = PID; ///< USB Product ID
     bool console = false; ///< Run debug console
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     unsigned int address = 0; ///< Address for transfer/execute
     unsigned int length = 0; ///< Length for download
@@ -98,7 +100,9 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
-        ("r,r", po::value<std::string>(), "Run: <address>");
+        ("r,r", po::value<std::string>(), "Run: <address>")
+        ("help,h", "Help: Show this help message")
+        ("dump,D", po::value<std::string>(), "Dump BIOS: <file>");
 
     po::variables_map vm;
 
@@ -152,6 +156,13 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         args.command = CommandLineArgs::RUN;
         args.address = std::stoul(vm["r"].as<std::string>(), nullptr, 0);
     }
+    else if (vm.count("help") || vm.count("h")) {
+        args.command = CommandLineArgs::NONE;
+    } 
+    else if (vm.count("dump")) {
+        args.command = CommandLineArgs::DUMP;
+        args.filename = vm["dump"].as<std::string>();
+    }
 
     return args;
 }
@@ -186,6 +197,9 @@ int main(int argc, char *argv[])
                 break;
             case CommandLineArgs::RUN:
                 xfer::DoRun(args.address);
+                break;
+            case CommandLineArgs::DUMP:
+                xfer::DoBiosDump(args.filename.c_str());
                 break;
             default:
                 break;

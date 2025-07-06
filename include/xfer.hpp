@@ -58,6 +58,10 @@ constexpr std::size_t READ_PAYLOAD_SIZE = USB_PAYLOAD(USB_READPACKET_SIZE);
  */
 constexpr std::size_t WRITE_PAYLOAD_SIZE = USB_WRITEPACKET_SIZE;
 
+/**
+ * @brief Dump BIOS.
+ */
+int DoBiosDump(const char *filename);
 
 /**
  * @brief Download data from device and write to file.
@@ -66,7 +70,7 @@ constexpr std::size_t WRITE_PAYLOAD_SIZE = USB_WRITEPACKET_SIZE;
  * @param size Number of bytes to download.
  * @return 1 on success, 0 on error.
  */
-int DoDownload(const char* filename, unsigned int address, unsigned int size);
+int DoDownload(const char* filename, uint32_t address, std::size_t size);
 
 /**
  * @brief Upload data from file to device.
@@ -74,7 +78,7 @@ int DoDownload(const char* filename, unsigned int address, unsigned int size);
  * @param address Device address to write to.
  * @return 1 on success, 0 on error.
  */
-int DoUpload(const char* filename, unsigned int address, const bool execute = false);
+int DoUpload(const char* filename, uint32_t address, const bool execute = false);
 
 /**
  * @brief Send execute command to device at given address.
@@ -89,7 +93,7 @@ int DoRun(unsigned int address);
  * @param address Address to execute.
  * @return 1 on success, 0 on error.
  */
-int DoExecute(const char* filename, unsigned int address);
+int DoExecute(const char* filename, uint32_t address);
 
 /**
  * @brief Initialize FTDI device communication.
@@ -109,7 +113,7 @@ void CloseComms();
  * @param arg Input string.
  * @param result Output parsed value.
  */
-void ParseNumericArg(const char* arg, unsigned int* result);
+void ParseNumericArg(const char* arg, uint32_t * result);
 
 /**
  * @brief Enter debug console mode, printing device output to stdout.
