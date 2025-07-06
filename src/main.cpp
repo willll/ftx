@@ -92,17 +92,24 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     CommandLineArgs args;
     po::options_description desc("Allowed options");
     desc.add_options()
-        ("v", po::value<std::string>(), "Device VID (hex) [optional]")
-        ("p", po::value<std::string>(), "Device PID (hex) [optional]")
-        ("c", "Run debug console")
-        ("d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
-        ("u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
-        ("x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
-        ("r", po::value<std::string>(), "Run: <address>");
+        ("v,v", po::value<std::string>(), "Device VID (hex) [optional]")
+        ("p,p", po::value<std::string>(), "Device PID (hex) [optional]")
+        ("c,c", "Run debug console")
+        ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
+        ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
+        ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
+        ("r,r", po::value<std::string>(), "Run: <address>");
 
     po::variables_map vm;
+
     try {
-        po::store(po::parse_command_line(argc, argv, desc), vm);
+        auto parsed = po::command_line_parser(argc, argv)
+                  .options(desc)
+                  .style(po::command_line_style::unix_style |
+                         po::command_line_style::allow_short)
+                  .run();
+
+        po::store(parsed, vm);
         po::notify(vm);
     } catch (const std::exception& e) {
         std::cerr << "Error parsing command line: " << e.what() << std::endl;
