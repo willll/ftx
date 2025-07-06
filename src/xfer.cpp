@@ -147,9 +147,7 @@ namespace xfer
         xfer::ReportPerformance(before, after, size);
 
         std::cout << "[DoDownload] Calculating CRC..." << std::endl;
-        calcChecksum = crc8::crc_init();
         calcChecksum = crc8::crc_update(calcChecksum, pFileBuffer.get(), size);
-        calcChecksum = crc8::crc_finalize(calcChecksum);
 
         if (readChecksum != calcChecksum)
         {
@@ -206,9 +204,7 @@ namespace xfer
         }
         fclose(File);
 
-        crc8::crc_t checksum = crc8::crc_init();
-        checksum = crc8::crc_update(checksum, pFileBuffer.get(), size);
-        checksum = crc8::crc_finalize(checksum);
+        crc8::crc_t checksum = crc8::crc_update(checksum, pFileBuffer.get(), size);
 
         auto before = std::chrono::steady_clock::now();
         int status = xfer::SendCommandWithAddressAndLength(USBDC_FUNC_UPLOAD, address, size);

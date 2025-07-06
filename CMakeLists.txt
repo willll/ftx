@@ -15,10 +15,17 @@ find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
 
-add_executable(ftx main.cpp xfer.cpp crc.cpp)
+add_executable(ftx
+  src/main.cpp
+  src/xfer.cpp
+  src/crc.cpp
+)
 
-target_include_directories(ftx PRIVATE ${CMAKE_SOURCE_DIR}/satcom_lib)
-target_include_directories(ftx PRIVATE ${LIBFTDI1_INCLUDE_DIRS})
+target_include_directories(ftx
+  PRIVATE ${CMAKE_SOURCE_DIR}/include
+  PRIVATE ${CMAKE_SOURCE_DIR}/satcom_lib
+  PRIVATE ${LIBFTDI1_INCLUDE_DIRS}
+)
 
 
 target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem ${LIBFTDI1_LIBRARIES})
