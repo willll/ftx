@@ -61,17 +61,29 @@ namespace xfer
     int SendCommandWithAddressAndLength(unsigned int cmd, unsigned int address,
                                         unsigned int size)
     {
-        SendBuf[0] = cmd;
-        SendBuf[1] = (unsigned char)(address >> 24);
-        SendBuf[2] = (unsigned char)(address >> 16);
-        SendBuf[3] = (unsigned char)(address >> 8);
-        SendBuf[4] = (unsigned char)(address);
-        SendBuf[5] = (unsigned char)(size >> 24);
-        SendBuf[6] = (unsigned char)(size >> 16);
-        SendBuf[7] = (unsigned char)(size >> 8);
-        SendBuf[8] = (unsigned char)(size);
+        uint8_t i = 0;
 
-        return ftdi_write_data(&Device, SendBuf, 9);
+        SendBuf[i++] = cmd;
+        SendBuf[i++] = static_cast<unsigned char>(address >> 24);
+        SendBuf[i++] = static_cast<unsigned char>(address >> 16);
+        SendBuf[i++] = static_cast<unsigned char>(address >> 8);
+        SendBuf[i++] = static_cast<unsigned char>(address);
+        SendBuf[i++] = static_cast<unsigned char>(size >> 24);
+        SendBuf[i++] = static_cast<unsigned char>(size >> 16);
+        SendBuf[i++] = static_cast<unsigned char>(size >> 8);
+        SendBuf[i++] = static_cast<unsigned char>(size);
+
+        if(USBDC_FUNC_EXEC_EXT == cmd)
+        {
+            // Reset_flag
+            SendBuf[i++] = 0x00;
+            SendBuf[i++] = 0x00;
+            SendBuf[i++] = 0x00;
+            SendBuf[i++] = 0x00;
+        }
+
+
+        return ftdi_write_data(&Device, SendBuf, i);
     }
 
     /**
@@ -175,13 +187,15 @@ namespace xfer
      * @param address Device address to write to.
      * @return 1 on success, 0 on error.
      */
-    int DoUpload(const char *filename, unsigned int address)
+    int DoUpload(const char *filename, unsigned int address, const bool execute)
     {
-        std::cout << "[DoUpload] Starting upload: file='" << filename << "', address=0x" << std::hex << address << std::dec << std::endl;
+        std::string functnName = execute ? "DoUploadExecute" : "DoUpload";
+
+        std::cout << "[" << functnName << "] Starting upload: file='" << filename << "', address=0x" << std::hex << address << std::dec << std::endl;
         FILE *File = fopen(filename, "rb");
         if (!File)
         {
-            std::cerr << "[DoUpload] Can't open the file '" << filename << "'" << std::endl;
+            std::cerr << "[" << functnName << "] Can't open the file '" << filename << "'" << std::endl;
             return 0;
         }
 
@@ -190,7 +204,7 @@ namespace xfer
         fseek(File, 0, SEEK_SET);
         if (size <= 0)
         {
-            std::cerr << "[DoUpload] File is empty or error reading size." << std::endl;
+            std::cerr << "[" << functnName << "] File is empty or error reading size." << std::endl;
             fclose(File);
             return 0;
         }
@@ -198,7 +212,7 @@ namespace xfer
         std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[size]);
         if (fread(pFileBuffer.get(), 1, size, File) != static_cast<size_t>(size))
         {
-            std::cerr << "[DoUpload] File read error" << std::endl;
+            std::cerr << "[" << functnName << "] File read error" << std::endl;
             fclose(File);
             return 0;
         }
@@ -207,10 +221,21 @@ namespace xfer
         crc8::crc_t checksum = crc8::crc_update(checksum, pFileBuffer.get(), size);
 
         auto before = std::chrono::steady_clock::now();
-        int status = xfer::SendCommandWithAddressAndLength(USBDC_FUNC_UPLOAD, address, size);
+
+        if (execute)
+        {
+            std::cout << "[" << functnName << "] Uploading and executing at address 0x" << std::hex << address << std::dec << std::endl;
+            SendBuf[0] = USBDC_FUNC_EXEC_EXT;
+        }
+        else
+        {
+            std::cout << "[" << functnName << "] Uploading to address 0x" << std::hex << address << std::dec << std::endl;
+            SendBuf[0] = USBDC_FUNC_UPLOAD;
+        }
+        int status = xfer::SendCommandWithAddressAndLength(SendBuf[0], address, size);
         if (status < 0)
         {
-            std::cerr << "[DoUpload] Send upload command error: " << ftdi_get_error_string(&Device) << std::endl;
+            std::cerr << "[" << functnName << "] Send upload command error: " << ftdi_get_error_string(&Device) << std::endl;
             return 0;
         }
 
@@ -220,18 +245,18 @@ namespace xfer
             status = ftdi_write_data(&Device, &pFileBuffer[sent], size - sent);
             if (status < 0)
             {
-                std::cerr << "[DoUpload] Send data error: " << ftdi_get_error_string(&Device) << std::endl;
+                std::cerr << "[" << functnName << "] Send data error: " << ftdi_get_error_string(&Device) << std::endl;
                 return 0;
             }
             sent += status;
-            std::cout << "[DoUpload] Sent " << sent << "/" << size << " bytes..." << std::endl;
+            std::cout << "[" << functnName << "] Sent " << sent << "/" << size << " bytes..." << std::endl;
         }
 
         SendBuf[0] = static_cast<unsigned char>(checksum);
         status = ftdi_write_data(&Device, SendBuf, 1);
         if (status < 0)
         {
-            std::cerr << "[DoUpload] Send checksum error: " << ftdi_get_error_string(&Device) << std::endl;
+            std::cerr << "[" << functnName << "] Send checksum error: " << ftdi_get_error_string(&Device) << std::endl;
             return 0;
         }
 
@@ -240,20 +265,21 @@ namespace xfer
             status = ftdi_read_data(&Device, RecvBuf, 1);
             if (status < 0)
             {
-                std::cerr << "[DoUpload] Read upload result failed: " << ftdi_get_error_string(&Device) << std::endl;
+                std::cerr << "[" << functnName << "] Read upload result failed: " << ftdi_get_error_string(&Device) << std::endl;
                 return 0;
             }
         } while (status == 0);
 
         if (RecvBuf[0] != 0)
         {
-            std::cerr << "[DoUpload] Device reported upload error." << std::endl;
+            std::cerr << "[" << functnName << "] Device reported upload error." << std::endl;
             return 0;
         }
 
         auto after = std::chrono::steady_clock::now();
         xfer::ReportPerformance(before, after, size);
-        std::cout << "[DoUpload] Upload complete." << std::endl;
+        std::cout << "[" << functnName << "] Upload complete." << std::endl;
+
         return 1;
     }
 
@@ -290,14 +316,9 @@ namespace xfer
     {
         std::cout << "[DoExecute] Uploading and executing: file='" << filename << "', address=0x" << std::hex << address << std::dec << std::endl;
         int status = 0;
-        if (DoUpload(filename, address))
+        if (DoUpload(filename, address, true))
         {
             std::cout << "[DoExecute] Upload successful. Executing..." << std::endl;
-            status = DoRun(address);
-            if (status)
-                std::cout << "[DoExecute] Execution command sent successfully." << std::endl;
-            else
-                std::cerr << "[DoExecute] Execution command failed." << std::endl;
         }
         else
         {

@@ -74,7 +74,7 @@ int DoDownload(const char* filename, unsigned int address, unsigned int size);
  * @param address Device address to write to.
  * @return 1 on success, 0 on error.
  */
-int DoUpload(const char* filename, unsigned int address);
+int DoUpload(const char* filename, unsigned int address, const bool execute = false);
 
 /**
  * @brief Send execute command to device at given address.
