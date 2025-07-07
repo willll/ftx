@@ -422,12 +422,13 @@ namespace xfer
      */
     void DoConsole()
     {
+        const int RecvBufSize = 62;
         std::cout << "[DoConsole] Entering debug console mode. Press Ctrl+C to exit." << std::endl;
         int status = 0;
         while (status >= 0)
         {
             // Read data in smaller chunks
-            status = ftdi_read_data(&Device, RecvBuf, 62);
+            status = ftdi_read_data(&Device, RecvBuf, RecvBufSize);
             if (status < 0)
             {
                 std::cerr << "[DoConsole] Read data error: " << ftdi_get_error_string(&Device) << std::endl;
@@ -438,7 +439,15 @@ namespace xfer
                 {
                     if (isprint(RecvBuf[ii]) || isblank(RecvBuf[ii]))
                     {
-                        std::cout << static_cast<char>(RecvBuf[ii]);
+                            std::cout << static_cast<char>(RecvBuf[ii]);
+                    } else if (RecvBuf[ii] == '\n')
+                    {
+                        std::cout << "\n";
+                    }
+                    else if (RecvBuf[ii] == '\r')
+                    {
+                        // Ignore carriage return
+                        continue;
                     }
                 }
                 std::cout.flush();
