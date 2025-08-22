@@ -25,6 +25,17 @@ This project provides a modern C++17 command-line utility for transferring data 
 
 ## Building
 
+### Linux
+
+```sh
+mkdir -p build
+cd build
+cmake ..
+make
+```
+
+### MS Windows 
+
 ```sh
 mkdir -p build
 cd build

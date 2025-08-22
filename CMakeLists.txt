@@ -21,6 +21,15 @@ add_executable(ftx
   src/crc.cpp
 )
 
+# win32 config
+if (WIN32)
+  add_compile_definitions("WIN32" "UNICODE" "_UNICODE")
+  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  set_target_properties(ftx PROPERTIES 
+    CXX_COMPILER_FLAGS "/std:c++17"
+  )
+endif()
+
 target_include_directories(ftx
   PRIVATE ${CMAKE_SOURCE_DIR}/include
   PRIVATE ${CMAKE_SOURCE_DIR}/satcom_lib
