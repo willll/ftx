@@ -118,7 +118,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         std::cerr << "Error parsing command line: " << e.what() << std::endl;
         std::cout << desc << std::endl;
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     if (vm.count("v")) {
@@ -179,12 +179,17 @@ int main(int argc, char *argv[])
 
     if (args.command == CommandLineArgs::NONE && !args.console) {
         PrintUsage(argv[0]);
-        return 1;
+        exit(EXIT_FAILURE);
     }
 
     if (xfer::InitComms(args.vid, args.pid)) {
         atexit(xfer::CloseComms);
         signal(SIGINT, xfer::Signal);
+        signal(SIGTERM, xfer::Signal);
+        signal(SIGQUIT, xfer::Signal);
+        signal(SIGKILL, xfer::Signal);
+        signal(SIGSEGV, xfer::Signal);
+
         switch (args.command) {
             case CommandLineArgs::DOWNLOAD:
                 xfer::DoDownload(args.filename.c_str(), args.address, args.length);
@@ -209,5 +214,5 @@ int main(int argc, char *argv[])
         }
     }
  
-    return 0;
+    return EXIT_SUCCESS;
 }
