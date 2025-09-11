@@ -74,7 +74,7 @@ namespace xfer
         SendBuf[i++] = static_cast<unsigned char>(size >> 8);
         SendBuf[i++] = static_cast<unsigned char>(size);
 
-        if(USBDC_FUNC_EXEC_EXT == cmd)
+        if (USBDC_FUNC_EXEC_EXT == cmd)
         {
             // Reset_flag
             SendBuf[i++] = 0x00;
@@ -82,7 +82,6 @@ namespace xfer
             SendBuf[i++] = 0x00;
             SendBuf[i++] = 0x00;
         }
-
 
         return ftdi_write_data(&Device, SendBuf, i);
     }
@@ -110,7 +109,6 @@ namespace xfer
         std::cout << "[DoBiosDump] Starting BIOS dump to file: " << filename << std::endl;
         return DoDownload(filename, saturn::bios_address, saturn::bios_size);
     }
-    
 
     // Placeholders for the actual implementations:
     /**
@@ -320,7 +318,7 @@ namespace xfer
      * @param address Address to execute.
      * @return 1 on success, 0 on error.
      */
-    int DoExecute(const char * filename, uint32_t address)
+    int DoExecute(const char *filename, uint32_t address)
     {
         std::cout << "[DoExecute] Uploading and executing: file='" << filename << "', address=0x" << std::hex << address << std::dec << std::endl;
         int status = 0;
@@ -439,8 +437,9 @@ namespace xfer
                 {
                     if (isprint(RecvBuf[ii]) || isblank(RecvBuf[ii]))
                     {
-                            std::cout << static_cast<char>(RecvBuf[ii]);
-                    } else if (RecvBuf[ii] == '\n')
+                        std::cout << static_cast<char>(RecvBuf[ii]);
+                    }
+                    else if (RecvBuf[ii] == '\n')
                     {
                         std::cout << "\n";
                     }
@@ -453,6 +452,8 @@ namespace xfer
                 std::cout.flush();
             }
         }
+    
+        std::exit(EXIT_SUCCESS);
     }
     /**
      * @brief Signal handler for clean exit on interrupt.
@@ -460,7 +461,9 @@ namespace xfer
      */
     void Signal(int sig)
     {
-        std::exit(EXIT_FAILURE);
+        std::cout << "\n[Signal] Caught signal " << sig << ", exiting..." << std::endl;
+        xfer::CloseComms();
+        std::exit(EXIT_SUCCESS);
     }
 
 } // namespace xfer
