@@ -99,9 +99,10 @@ int DoExecute(const char* filename, uint32_t address);
  * @brief Initialize FTDI device communication.
  * @param VID USB Vendor ID.
  * @param PID USB Product ID.
+ * @param recover Flag indicating whether to attempt recovery on error.
  * @return 1 on success, 0 on error.
  */
-int InitComms(int VID, int PID);
+int InitComms(int VID, int PID, bool recover=false);
 
 /**
  * @brief Close FTDI device communication and purge buffers.
