@@ -119,7 +119,7 @@ void ParseNumericArg(const char* arg, uint32_t * result);
 /**
  * @brief Enter debug console mode, printing device output to stdout.
  */
-void DoConsole();
+void DoConsole(bool acknowledge = true);
 
 /**
  * @brief Signal handler for clean exit on interrupt.

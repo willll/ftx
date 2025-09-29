@@ -532,9 +532,9 @@ namespace xfer
     }
 
     /**
-     * @brief Enter debug console mode, printing device output to stdout.
+     * @brief Enter debug console mode, printing device output to stdout and acknowledging character consumption.
      */
-    void DoConsole()
+    void DoConsole(bool acknowledge)
     {
         // Step 1: Define the receive buffer size
         const int RecvBufSize = 62;
@@ -543,46 +543,78 @@ namespace xfer
         // Step 3: Log entry into debug console mode
         std::cout << "[DoConsole] Entering debug console mode. Press Ctrl+C to exit." << std::endl;
         int status = 0;
-        // Step 4: Continuously read data from the device
+        // Step 4: Define the acknowledgment byte (e.g., ASCII ACK = 0x06)
+        const unsigned char ackByte = 0x06;
+
+        // Step 5: Continuously read data from the device
         while (status >= 0)
         {
-            // Step 5: Read data into the buffer
+            // Step 6: Read data into the buffer
             status = ftdi_read_data(&Device, pFileBuffer.get(), RecvBufSize);
             if (status < 0)
             {
-                // Step 6: Handle error if reading data fails
+                // Step 7: Handle error if reading data fails
                 std::cerr << "[DoConsole] Read data error: " << ftdi_get_error_string(&Device) << std::endl;
             }
-            else
+            else if (status > 0)
             {
-                // Step 7: Process each received byte
+                // Step 8: Process each received byte
                 for (int ii = 0; ii < status; ++ii)
                 {
-                    if (isprint(pFileBuffer[ii]) || isblank(pFileBuffer[ii]))
+                    unsigned char c = pFileBuffer[ii];
+                    if (isprint(c) || isblank(c))
                     {
-                        // Step 8: Print printable or blank characters
-                        std::cout << static_cast<char>(pFileBuffer[ii]);
+                        // Step 9: Print printable or blank characters directly
+                        std::cout << static_cast<char>(c);
                     }
-                    else if (pFileBuffer[ii] == '\n')
+                    else if (c == '\n')
                     {
-                        // Step 9: Handle newline characters
+                        // Step 10: Handle newline characters
                         std::cout << std::endl;
                     }
-                    else if (pFileBuffer[ii] == '\r')
+                    else if (c == '\t')
                     {
-                        // Step 10: Ignore carriage return characters
-                        std::cerr << "[DoConsole] Ignoring carriage return." << std::endl;
-                        continue;
+                        // Step 10: Handle tab characters
+                        std::cout << "    ";  // Print four spaces for a tab
+                    }
+                    else if (c == '\r')
+                    {
+                        // Step 11: Handle carriage return (optional: could print or process differently)
+                        std::cout << "[CR]";
+                    }
+                    else
+                    {
+                        // Step 12: Handle non-printable characters by displaying their hex value
+                        std::cout << "[0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c) << "]" << std::dec;
                     }
                 }
-                // Step 11: Flush the output to ensure immediate display
+                // Step 13: Flush the output to ensure immediate display
                 std::cout.flush();
+
+                if (acknowledge)
+                {
+                    // Step 14: Send acknowledgment to the device to indicate data consumption
+                    int writeStatus = ftdi_write_data(&Device, &ackByte, 1);
+                    if (writeStatus < 0)
+                    {
+                        // Step 15: Handle error if sending acknowledgment fails
+                        std::cerr << "[DoConsole] Failed to send ACK: " << ftdi_get_error_string(&Device) << std::endl;
+                        //break;
+                    }
+                    else if (writeStatus != 1)
+                    {
+                        // Step 16: Handle case where ACK was not sent correctly
+                        std::cerr << "[DoConsole] Incomplete ACK transmission: " << writeStatus << " bytes sent" << std::endl;
+                        //break;
+                    }
+                }
             }
         }
-    
-        // Step 12: Exit the program on completion
-        std::exit(EXIT_SUCCESS);
+
+        // Step 17: Log exit from console mode
+        std::cout << "[DoConsole] Exiting debug console mode." << std::endl;
     }
+
     /**
      * @brief Signal handler for clean exit on interrupt.
      * @param sig Signal number.
