@@ -39,6 +39,7 @@
 #include <chrono>
 #include <thread>
 
+#include "log.hpp"
 #include "xfer.hpp"
 #include "crc.hpp"
 #include "saturn.hpp"
@@ -536,8 +537,10 @@ namespace xfer
      */
     void DoConsole(bool acknowledge)
     {
+        // setting std::cout to unbuffered mode
+        std::cout.setf(std::ios::unitbuf);
         // Step 1: Define the receive buffer size
-        const int RecvBufSize = 62;
+        const int RecvBufSize = 512;
         // Step 2: Allocate a buffer for receiving console data
         std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[RecvBufSize]);
         // Step 3: Log entry into debug console mode
@@ -551,6 +554,9 @@ namespace xfer
         {
             // Step 6: Read data into the buffer
             status = ftdi_read_data(&Device, pFileBuffer.get(), RecvBufSize);
+            
+            cdbg << "[DoConsole] Read status: " << status << " bytes" << std::endl;
+
             if (status < 0)
             {
                 // Step 7: Handle error if reading data fails
@@ -558,6 +564,14 @@ namespace xfer
             }
             else if (status > 0)
             {
+                // Log raw data in hex
+                cdbg << "[DoConsole] Raw data: ";
+                for (int ii = 0; ii < status; ++ii)
+                {
+                    cdbg << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(pFileBuffer[ii]) << " ";
+                }
+                cdbg << std::dec << std::endl;
+
                 // Step 8: Process each received byte
                 for (int ii = 0; ii < status; ++ii)
                 {
@@ -599,14 +613,15 @@ namespace xfer
                     {
                         // Step 15: Handle error if sending acknowledgment fails
                         std::cerr << "[DoConsole] Failed to send ACK: " << ftdi_get_error_string(&Device) << std::endl;
-                        //break;
+                        break;
                     }
                     else if (writeStatus != 1)
                     {
                         // Step 16: Handle case where ACK was not sent correctly
                         std::cerr << "[DoConsole] Incomplete ACK transmission: " << writeStatus << " bytes sent" << std::endl;
-                        //break;
+                        break;
                     }
+                    cdbg << "[DoConsole] Sent ACK (0x06)" << std::endl;
                 }
             }
         }
