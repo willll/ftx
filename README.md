@@ -27,12 +27,24 @@ This project provides a modern C++17 command-line utility for transferring data 
 
 ### Linux
 
+#### Release
+
 ```sh
 mkdir -p build
 cd build
 cmake ..
 make
 ```
+
+#### Debug
+
+```sh
+mkdir -p build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug -G "Ninja" .. 
+cmake --build .
+```
+
 
 ### MS Windows 
 
