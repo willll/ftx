@@ -2,11 +2,27 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "(gdb) Launch ftx -c",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/ftx",
+            "args": [
+                "-c"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+        },
+        {
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/ftx",
-            "args": ["--dump", "bios.bin"],
+            "args": [
+                "--dump",
+                "bios.bin"
+            ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
@@ -30,14 +46,20 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/ftx",
-            "args": ["-help"],
+            "args": [
+                "-help"
+            ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": true,
             "MIMode": "gdb",
             "setupCommands": [
-                { "description": "Enable pretty-printing for gdb", "text": "-enable-pretty-printing", "ignoreFailures": true }
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
             ]
         }
     ]
