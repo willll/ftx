@@ -19,9 +19,9 @@ pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
 
 # Create an interface target wrapping pkg-config results for libftdi1 so we can
 # link to it in a target-oriented way instead of using raw variables everywhere.
-add_library(libftdi1::pkgconfig INTERFACE)
-target_include_directories(libftdi1::pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS})
-target_link_libraries(libftdi1::pkgconfig INTERFACE ${LIBFTDI1_LIBRARIES})
+add_library(libftdi1_pkgconfig INTERFACE)
+target_include_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS})
+target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARIES})
 
 add_executable(ftx
   src/ftx.cpp
@@ -48,10 +48,20 @@ target_include_directories(ftx
 )
 
 
-target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem libftdi1::pkgconfig)
+target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem libftdi1_pkgconfig)
 
 # Use target-based language requirement (modern CMake)
 target_compile_features(ftx PRIVATE cxx_std_17)
+
+# If MAKE_BUILD_TYPE is set to DEBUG (either as a CMake variable or an
+# environment variable), define NDEBUG for the target. This deliberately follows
+# the user's request; note NDEBUG typically disables assert(), so this inverts
+# the usual convention.
+if((DEFINED MAKE_BUILD_TYPE AND "$<LOWER_CASE:${MAKE_BUILD_TYPE}>" STREQUAL "DEBUG") OR
+   ($<LOWER_CASE:"$ENV{MAKE_BUILD_TYPE}>" STREQUAL "DEBUG"))
+  message(STATUS "MAKE_BUILD_TYPE=DEBUG detected; adding NDEBUG definition to ftx")
+  target_compile_definitions(ftx PRIVATE NDEBUG)
+endif()
 
 # Code validation: cppcheck static analysis
 add_custom_target(
