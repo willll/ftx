@@ -538,7 +538,7 @@ namespace xfer
     void DoConsole(bool acknowledge)
     {
         // setting std::cout to unbuffered mode
-        std::cout.setf(std::ios::unitbuf);
+        //std::cout.setf(std::ios::unitbuf);
         // Step 1: Define the receive buffer size
         const int RecvBufSize = 512;
         // Step 2: Allocate a buffer for receiving console data
@@ -562,18 +562,23 @@ namespace xfer
                 // Step 7: Handle error if reading data fails
                 std::cerr << "[DoConsole] Read data error: " << ftdi_get_error_string(&Device) << std::endl;
             }
+            else if (status == 0)
+            {
+                // No data received; sleep briefly to avoid busy-waiting
+                //std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             else if (status > 0)
             {
                 // Log raw data in hex
-                cdbg << "[DoConsole] Raw data: ";
-                for (int ii = 0; ii < status; ++ii)
-                {
-                    cdbg << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(pFileBuffer[ii]) << " ";
-                }
-                cdbg << std::dec << std::endl;
+                // cdbg << "[DoConsole] Raw data: ";
+                // for (int ii = 0; ii < status; ++ii)
+                // {
+                //     cdbg << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(pFileBuffer[ii]) << " ";
+                // }
+                // cdbg << std::dec << std::endl;
 
                 // Step 8: Process each received byte
-                for (int ii = 0; ii < status; ++ii)
+                for (int ii = 0; ii < status; ii++)
                 {
                     unsigned char c = pFileBuffer[ii];
                     if (isprint(c) || isblank(c))
@@ -596,6 +601,11 @@ namespace xfer
                         // Step 11: Handle carriage return (optional: could print or process differently)
                         std::cout << "[CR]";
                     }
+                    else if (c == '\0' || c == '\1' || c == '\2')
+                    {
+                        // Step 11: Handle null characters (optional: could print or process differently)
+                        cdbg << "[NULL]";
+                    }
                     else
                     {
                         // Step 12: Handle non-printable characters by displaying their hex value
@@ -605,24 +615,24 @@ namespace xfer
                 // Step 13: Flush the output to ensure immediate display
                 std::cout.flush();
 
-                if (acknowledge)
-                {
-                    // Step 14: Send acknowledgment to the device to indicate data consumption
-                    int writeStatus = ftdi_write_data(&Device, &ackByte, 1);
-                    if (writeStatus < 0)
-                    {
-                        // Step 15: Handle error if sending acknowledgment fails
-                        std::cerr << "[DoConsole] Failed to send ACK: " << ftdi_get_error_string(&Device) << std::endl;
-                        break;
-                    }
-                    else if (writeStatus != 1)
-                    {
-                        // Step 16: Handle case where ACK was not sent correctly
-                        std::cerr << "[DoConsole] Incomplete ACK transmission: " << writeStatus << " bytes sent" << std::endl;
-                        break;
-                    }
-                    cdbg << "[DoConsole] Sent ACK (0x06)" << std::endl;
-                }
+                // if (acknowledge)
+                // {
+                //     // Step 14: Send acknowledgment to the device to indicate data consumption
+                //     int writeStatus = ftdi_write_data(&Device, &ackByte, 1);
+                //     if (writeStatus < 0)
+                //     {
+                //         // Step 15: Handle error if sending acknowledgment fails
+                //         std::cerr << "[DoConsole] Failed to send ACK: " << ftdi_get_error_string(&Device) << std::endl;
+                //         break;
+                //     }
+                //     else if (writeStatus != 1)
+                //     {
+                //         // Step 16: Handle case where ACK was not sent correctly
+                //         std::cerr << "[DoConsole] Incomplete ACK transmission: " << writeStatus << " bytes sent" << std::endl;
+                //         break;
+                //     }
+                //     cdbg << "[DoConsole] Sent ACK (0x06)" << std::endl;
+                // }
             }
         }
 
