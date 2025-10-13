@@ -24,7 +24,7 @@ jobs:
           mkdir buildwin
           cd  buildwin
           export PATH="/opt/mxe-w64/usr/bin/:$PATH"
-          x86_64-w64-mingw32.static-cmake .. -DWINDOWS=1 -DCMAKE_BUILD_TYPE=Release 
+          x86_64-w64-mingw32.static-cmake .. -DBOOST_ATOMIC_NO_LIB -DBOOST_FILESYSTEM_NO_LIB -DBOOST_PROGRAM_OPTIONS_NO_LIB -DUNICODE -DWIN32 -D_UNICODE -DCMAKE_BUILD_TYPE=Release 
           make
           x86_64-w64-mingw32.static-strip ftx.exe -o ../ftx.exe
 
