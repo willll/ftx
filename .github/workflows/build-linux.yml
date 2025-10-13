@@ -1,4 +1,4 @@
-name: Build Ftx
+name: Build Ftx Linux
 
 on:
   push:
@@ -35,3 +35,14 @@ jobs:
         with:
           name: ftx
           path: build/ftx
+
+      - name: Upload executable to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${GITHUB_REF##*/}/assets
+          asset_path: build/ftx
+          asset_name: ftx
+          asset_content_type: application/octet-stream
+        if: github.ref_type == 'tag'

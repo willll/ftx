@@ -1,4 +1,4 @@
-name: Build Ftx
+name: Build Ftx Windows
 
 on:
   push:
@@ -34,3 +34,15 @@ jobs:
         with:
           name: ftx.exe
           path: ftx.exe
+
+      - name: Upload executable to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${GITHUB_REF##*/}/assets
+          asset_path: ftx.exe
+          asset_name: ftx.exe
+          asset_content_type: application/octet-stream
+        if: github.ref_type == 'tag'
+
