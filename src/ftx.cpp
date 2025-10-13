@@ -186,8 +186,10 @@ int main(int argc, char *argv[])
         atexit(xfer::CloseComms);
         signal(SIGINT, xfer::Signal);
         signal(SIGTERM, xfer::Signal);
+    #ifndef _WIN32
         signal(SIGQUIT, xfer::Signal);
         signal(SIGKILL, xfer::Signal);
+    #endif
         signal(SIGSEGV, xfer::Signal);
 
         switch (args.command) {

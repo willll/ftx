@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-win32:
+    name: Build Windows
     runs-on: ubuntu-latest
 
     container:
@@ -24,7 +25,7 @@ jobs:
           mkdir buildwin
           cd  buildwin
           export PATH="/opt/mxe-w64/usr/bin/:$PATH"
-          x86_64-w64-mingw32.static-cmake .. -DUNICODE -DWIN32 -D_UNICODE -DCMAKE_BUILD_TYPE=Release 
+          x86_64-w64-mingw32.static-cmake .. -DCMAKE_BUILD_TYPE=Release 
           x86_64-w64-mingw32.static-cmake --build .
           x86_64-w64-mingw32.static-strip ftx.exe -o ../ftx.exe
 
@@ -33,3 +34,26 @@ jobs:
         with:
           name: ftx.exe
           path: ftx.exe
+
+   build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Create build directory and build
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftx-linux
+          path: build/ftx
