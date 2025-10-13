@@ -1,3 +1,5 @@
+[![Build Ftx](https://github.com/willll/ftx/actions/workflows/build.yml/badge.svg)](https://github.com/willll/ftx/actions/workflows/build.yml)
+
 # Sega Saturn USB Flash Cart Transfer Utility
 
 
