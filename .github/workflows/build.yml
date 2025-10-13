@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libboost-all-dev
+          sudo apt-get install -y libboost-all-dev libftdi1-dev
 
       - name: Create build directory and build
         run: |
