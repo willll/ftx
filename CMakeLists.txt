@@ -63,6 +63,9 @@ if((DEFINED MAKE_BUILD_TYPE AND "$<LOWER_CASE:${MAKE_BUILD_TYPE}>" STREQUAL "DEB
   target_compile_definitions(ftx PRIVATE NDEBUG)
 endif()
 
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+
 # Code validation: cppcheck static analysis
 add_custom_target(
   cppcheck
