@@ -42,25 +42,18 @@
             ]
         },
         {
-            "name": "Debug ftx",
+            "name": "Debug FTX",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/ftx",
+            "program": "${workspaceFolder}/build/ftx -c -C COM",
             "args": [
-                "-help"
+                "-c -C COM"
             ],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}/build",
             "environment": [],
             "externalConsole": true,
             "MIMode": "gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ]
         }
     ]
 }

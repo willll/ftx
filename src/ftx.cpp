@@ -54,7 +54,9 @@ void PrintUsage(const char* progName) {
     std::cout << "Options:\n";
     std::cout << "  -v  <VID>                     Device VID (Default 0x0403)\n";
     std::cout << "  -p  <PID>                     Device PID (Default 0x6001)\n";
+    std::cout << "  -s  <Serial>                  Device Serial (Default : Will match VID and PID with an FTDI serial)\n";
     std::cout << "  -c                            Run debug console\n";
+    std::cout << "  -l                            List available FTDI devices\n";
     std::cout << "  -help                         Help\n\n";
     std::cout << "Commands:\n";
     std::cout << "  -d  <file>  <address>  <size> Download data to file\n";
@@ -76,8 +78,9 @@ void PrintUsage(const char* progName) {
 struct CommandLineArgs {
     int vid = VID; ///< USB Vendor ID
     int pid = PID; ///< USB Product ID
+    std::string serial = ""; ///< Device Serial
     bool console = false; ///< Run debug console
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     unsigned int address = 0; ///< Address for transfer/execute
     unsigned int length = 0; ///< Length for download
@@ -96,6 +99,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     desc.add_options()
         ("v,v", po::value<std::string>(), "Device VID (hex) [optional]")
         ("p,p", po::value<std::string>(), "Device PID (hex) [optional]")
+        ("s,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
+        ("l,l", "List available FTDI devices")
         ("c,c", "Run debug console")
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
@@ -126,6 +131,12 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     }
     if (vm.count("p")) {
         args.pid = std::stoi(vm["p"].as<std::string>(), nullptr, 16);
+    }
+    if (vm.count("s")) {
+        args.serial = vm["s"].as<std::string>();
+    }
+    if (vm.count("l")) {
+        args.command = CommandLineArgs::LIST;
     }
     if (vm.count("c")) {
         args.console = true;
@@ -182,7 +193,12 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (xfer::InitComms(args.vid, args.pid)) {
+    if (args.command == CommandLineArgs::LIST) {
+        xfer::ListDevices(args.vid, args.pid);
+        exit(EXIT_SUCCESS);
+    }
+
+    if (xfer::InitComms(args.vid, args.pid, args.serial)) {
         atexit(xfer::CloseComms);
         signal(SIGINT, xfer::Signal);
         signal(SIGTERM, xfer::Signal);

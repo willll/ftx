@@ -28,6 +28,7 @@
 */
 
 #include <ftdi.h>
+#include <libusb.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -410,10 +411,23 @@ namespace xfer
      * @param PID USB Product ID.
      * @return 1 on success, 0 on error.
      */
-    int InitComms(int VID, int PID, bool recover)
+    int InitComms(int VID, int PID, const std::string &Serial, bool recover)
     {
         // Step 1: Log the initialization attempt with VID and PID
-        std::cout << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID << ", PID=0x" << PID << ")" << std::dec << std::endl;
+        if (Serial.empty())
+        {
+            std::cout << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID
+                      << ", PID=0x" << PID
+                      << ")" << std::dec << std::endl;
+        }
+        else
+        {
+            std::cout << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID
+                      << ", PID=0x" << PID
+                      << ", Serial=" << Serial
+                      << ")" << std::dec << std::endl;
+        }
+
         int status = ftdi_init(&Device);
         bool error = false;
 
@@ -427,7 +441,15 @@ namespace xfer
         else
         {
             // Step 4: Open the FTDI device using VID and PID
-            status = ftdi_usb_open(&Device, VID, PID);
+            if (Serial.empty())
+            {
+                status = ftdi_usb_open(&Device, VID, PID);
+            }
+            else
+            {
+                status = ftdi_usb_open_desc(&Device, VID, PID, nullptr, Serial.c_str());
+            }
+
             if (status < 0 && status != -5)
             {
                 // Step 5: Handle error if device cannot be opened (except for specific error -5)
@@ -441,7 +463,7 @@ namespace xfer
                 if (status < 0)
                 {
                     // Step 7: Handle error if buffer purge fails
-                    std::cerr << "[InitComms] Purge buffers error: " << ftdi_get_error_string(&Device) << std::endl;
+                    std::cerr << "[InitComms] Purge buffers error (" << status << "): " << ftdi_get_error_string(&Device) << std::endl;
 
                     if (!recover)
                     {
@@ -458,7 +480,7 @@ namespace xfer
                         else
                         {
                             // Step 10: Retry initialization with recovery flag set
-                            return InitComms(VID, PID, true);
+                            return InitComms(VID, PID, Serial, true);
                         }
                     }
                     else
@@ -500,6 +522,7 @@ namespace xfer
                 if (error)
                 {
                     ftdi_usb_close(&Device);
+                    ftdi_free(&Device);
                 }
             }
         }
@@ -528,6 +551,7 @@ namespace xfer
         }
         // Step 4: Close the FTDI device
         ftdi_usb_close(&Device);
+        ftdi_free(&Device);
         // Step 5: Log successful closure
         std::cout << "[CloseComms] FTDI device closed." << std::endl;
     }
@@ -538,7 +562,7 @@ namespace xfer
     void DoConsole(bool acknowledge)
     {
         // setting std::cout to unbuffered mode
-        //std::cout.setf(std::ios::unitbuf);
+        // std::cout.setf(std::ios::unitbuf);
         // Step 1: Define the receive buffer size
         const int RecvBufSize = 512;
         // Step 2: Allocate a buffer for receiving console data
@@ -554,7 +578,7 @@ namespace xfer
         {
             // Step 6: Read data into the buffer
             status = ftdi_read_data(&Device, pFileBuffer.get(), RecvBufSize);
-            
+
             cdbg << "[DoConsole] Read status: " << status << " bytes" << std::endl;
 
             if (status < 0)
@@ -565,7 +589,7 @@ namespace xfer
             else if (status == 0)
             {
                 // No data received; sleep briefly to avoid busy-waiting
-                //std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                // std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             else if (status > 0)
             {
@@ -594,7 +618,7 @@ namespace xfer
                     else if (c == '\t')
                     {
                         // Step 10: Handle tab characters
-                        std::cout << "    ";  // Print four spaces for a tab
+                        std::cout << "    "; // Print four spaces for a tab
                     }
                     else if (c == '\r')
                     {
@@ -638,6 +662,68 @@ namespace xfer
 
         // Step 17: Log exit from console mode
         std::cout << "[DoConsole] Exiting debug console mode." << std::endl;
+    }
+
+    /*
+     * @brief List available FTDI devices.
+     */
+    void ListDevices(int vid, int pid)
+    {
+        // Step 1: Find all connected FTDI devices matching the given VID and PID
+        struct ftdi_device_list *devlist, *curdev;
+
+        int status = ftdi_init(&Device);
+
+        if (status < 0)
+        {
+            std::cerr << "Failed to initialize FTDI context\n";
+            return;
+        }
+
+        status = ftdi_usb_find_all(&Device, &devlist, vid, pid);
+        if (status < 0)
+        {
+            std::cerr << "[ListDevices] USB device listing error: " << ftdi_get_error_string(&Device) << std::endl;
+            return;
+        }
+        else if (status == 0)
+        {
+            std::cout << "[ListDevices] No devices found." << std::endl;
+            return;
+        }
+        else
+        {
+            std::cout << "[ListDevices] Found " << status << " device(s):" << std::endl;
+        }
+
+        // Step 2: Iterate over the device list and print each device's information
+        curdev = devlist;
+        while (curdev != nullptr)
+        {
+            char manufacturer[128], description[128], serial[128];
+            int ret = ftdi_usb_get_strings(&Device, curdev->dev, manufacturer, 128, description, 128, serial, 128);
+            if (ret < 0)
+            {
+                std::cerr << "Error getting device strings: " << ftdi_get_error_string(&Device) << std::endl;
+            }
+            else
+            {
+                std::cout << "[ListDevices]  Device:" << std::endl;
+                std::cout << "  Manufacturer: " << manufacturer << std::endl;
+                std::cout << "  Description: " << description << std::endl;
+                std::cout << "  Serial: " << serial << std::endl;
+                std::cout << "  Bus: " << static_cast<int>(libusb_get_bus_number(curdev->dev)) << std::endl;
+                std::cout << "  Address: " << static_cast<int>(libusb_get_device_address(curdev->dev)) << std::endl;
+                std::cout << "  Port: " << static_cast<int>(libusb_get_port_number(curdev->dev)) << std::endl;
+            }
+            curdev = curdev->next;
+        }
+
+        // Step 3: Free the device list
+        if (devlist != nullptr)
+        {
+            ftdi_list_free(&devlist);
+        }
     }
 
     /**

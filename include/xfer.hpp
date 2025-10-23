@@ -102,7 +102,7 @@ int DoExecute(const char* filename, uint32_t address);
  * @param recover Flag indicating whether to attempt recovery on error.
  * @return 1 on success, 0 on error.
  */
-int InitComms(int VID, int PID, bool recover=false);
+int InitComms(int VID, int PID, const std::string& Serial, bool recover=false);
 
 /**
  * @brief Close FTDI device communication and purge buffers.
@@ -120,6 +120,11 @@ void ParseNumericArg(const char* arg, uint32_t * result);
  * @brief Enter debug console mode, printing device output to stdout.
  */
 void DoConsole(bool acknowledge = false);
+
+/**
+ * @brief List available FTDI devices.
+ */
+void ListDevices(int vid, int pid);
 
 /**
  * @brief Signal handler for clean exit on interrupt.
