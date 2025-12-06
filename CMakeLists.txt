@@ -53,6 +53,7 @@ endif()
 
 add_executable(ftx
   src/ftx.cpp
+  src/ftdi.cpp
   src/xfer.cpp
   src/crc.cpp
 )

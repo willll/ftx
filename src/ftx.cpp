@@ -36,6 +36,7 @@
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
 
+#include "ftdi.hpp"
 #include "xfer.hpp"
 
 
@@ -194,19 +195,19 @@ int main(int argc, char *argv[])
     }
 
     if (args.command == CommandLineArgs::LIST) {
-        xfer::ListDevices(args.vid, args.pid);
+        ftdi::ListDevices(args.vid, args.pid);
         exit(EXIT_SUCCESS);
     }
 
-    if (xfer::InitComms(args.vid, args.pid, args.serial)) {
-        atexit(xfer::CloseComms);
-        signal(SIGINT, xfer::Signal);
-        signal(SIGTERM, xfer::Signal);
+    if (ftdi::InitComms(args.vid, args.pid, args.serial)) {
+        atexit(ftdi::CloseComms);
+        signal(SIGINT, ftdi::Signal);
+        signal(SIGTERM, ftdi::Signal);
     #ifndef _WIN32
-        signal(SIGQUIT, xfer::Signal);
-        signal(SIGKILL, xfer::Signal);
+        signal(SIGQUIT, ftdi::Signal);
+        signal(SIGKILL, ftdi::Signal);
     #endif
-        signal(SIGSEGV, xfer::Signal);
+        signal(SIGSEGV, ftdi::Signal);
 
         switch (args.command) {
             case CommandLineArgs::DOWNLOAD:
@@ -228,7 +229,7 @@ int main(int argc, char *argv[])
                 break;
         }
         if (args.console) {
-            xfer::DoConsole();
+            ftdi::DoConsole();
         }
     }
  

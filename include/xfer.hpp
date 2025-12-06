@@ -34,7 +34,6 @@
 
 namespace xfer {
 
-
 /**
  * @brief USB read packet size in bytes.
  */
@@ -96,40 +95,10 @@ int DoRun(unsigned int address);
 int DoExecute(const char* filename, uint32_t address);
 
 /**
- * @brief Initialize FTDI device communication.
- * @param VID USB Vendor ID.
- * @param PID USB Product ID.
- * @param recover Flag indicating whether to attempt recovery on error.
- * @return 1 on success, 0 on error.
- */
-int InitComms(int VID, int PID, const std::string& Serial, bool recover=false);
-
-/**
- * @brief Close FTDI device communication and purge buffers.
- */
-void CloseComms();
-
-/**
  * @brief Parse a numeric argument from string.
  * @param arg Input string.
  * @param result Output parsed value.
  */
 void ParseNumericArg(const char* arg, uint32_t * result);
-
-/**
- * @brief Enter debug console mode, printing device output to stdout.
- */
-void DoConsole(bool acknowledge = false);
-
-/**
- * @brief List available FTDI devices.
- */
-void ListDevices(int vid, int pid);
-
-/**
- * @brief Signal handler for clean exit on interrupt.
- * @param sig Signal number.
- */
-void Signal(int sig);
 
 } // namespace xfer
