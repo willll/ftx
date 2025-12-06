@@ -2,58 +2,60 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) Launch ftx -c",
+            "name": "Build and Debug (ftx)",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/ftx",
-            "args": [
-                "-c"
-            ],
+            "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": true,
-        },
-        {
-            "name": "(gdb) Launch",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/ftx",
-            "args": [
-                "--dump",
-                "bios.bin"
-            ],
-            "stopAtEntry": false,
-            "cwd": "${fileDirname}",
-            "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "CMake Build",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
                     "text": "-enable-pretty-printing",
                     "ignoreFailures": true
-                },
+                }
+            ]
+        },
+        {
+            "name": "FTX -x SRL-Mandelbrot",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/ftx",
+            "args": [
+                "-x",
+                "/home/will/tmp/SRL-Mandelbrot/cd/data/0.bin",
+                "0x06004000"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "preLaunchTask": "CMake Build",
+            "setupCommands": [
                 {
-                    "description": "Set Disassembly Flavor to Intel",
-                    "text": "-gdb-set disassembly-flavor intel",
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
                     "ignoreFailures": true
                 }
             ]
         },
         {
-            "name": "Debug FTX",
+            "name": "Attach to running ftx",
             "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/ftx -c -C COM",
-            "args": [
-                "-c -C COM"
-            ],
-            "stopAtEntry": true,
-            "cwd": "${workspaceFolder}/build",
-            "environment": [],
-            "externalConsole": true,
+            "request": "attach",
+            "program": "${workspaceFolder}/build/ftx",
+            "processId": "${command:pickProcess}",
             "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }
