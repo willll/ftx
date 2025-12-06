@@ -47,6 +47,26 @@ cmake -DCMAKE_BUILD_TYPE=Debug -G "Ninja" ..
 cmake --build .
 ```
 
+#### Static Build (Linux only)
+
+Build a statically-linked executable by passing `-DBUILD_STATIC=ON`:
+
+```sh
+mkdir -p build
+cd build
+cmake -DBUILD_STATIC=ON ..
+make
+```
+
+**Note:** A fully static build requires all dependencies to have static libraries available (e.g., `libboost-program-options.a`, `libboost-filesystem.a`, `libftdi1.a`, etc.). If static versions are unavailable, the build will automatically fall back to dynamic linking for those libraries with a warning. Most Linux distributions do not provide static Boost or libudev libraries by default.
+
+To ensure a fully static build on Debian/Ubuntu, install static development packages:
+
+```sh
+sudo apt install libboost-program-options-dev libboost-filesystem-dev libftdi1-dev libudev-dev
+```
+
+Then configure with `-DBUILD_STATIC=ON` as shown above.
 
 ### MS Windows 
 

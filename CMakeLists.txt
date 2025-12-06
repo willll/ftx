@@ -8,6 +8,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Always generate compile_commands.json for static analysis tools
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(BUILD_STATIC "Build a statically-linked executable (requires static libs)" OFF)
+
+if(BUILD_STATIC AND UNIX AND NOT APPLE)
+  message(STATUS "BUILD_STATIC=ON: attempting to produce a statically-linked executable")
+  set(Boost_USE_STATIC_LIBS ON)
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ".so" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
+else()
+  message(STATUS "BUILD_STATIC=OFF: producing a dynamically-linked executable (default)")
+endif()
+
 if(POLICY CMP0167)
   cmake_policy(SET CMP0167 NEW)
 endif()
@@ -22,6 +33,23 @@ pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
 add_library(libftdi1_pkgconfig INTERFACE)
 target_include_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS})
 target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARIES})
+
+# When building statically on Linux, libusb may require libudev; add it
+# to the pkgconfig wrapper so the final link picks it up.
+if(BUILD_STATIC AND UNIX AND NOT APPLE)
+  find_library(LIBUDEV_LIBRARY NAMES udev)
+  if(LIBUDEV_LIBRARY)
+    if(LIBUDEV_LIBRARY MATCHES "\\.so($|\\.)")
+      message(WARNING "Found only shared libudev (${LIBUDEV_LIBRARY}); cannot statically link it into the binary.")
+      string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
+      message(STATUS "Removed -static from CMAKE_EXE_LINKER_FLAGS; final binary will link libudev dynamically.")
+    endif()
+    target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBUDEV_LIBRARY})
+  else()
+    message(WARNING "BUILD_STATIC requested but libudev not found; static link may fail")
+    string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
+  endif()
+endif()
 
 add_executable(ftx
   src/ftx.cpp

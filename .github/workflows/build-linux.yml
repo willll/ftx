@@ -21,13 +21,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libboost-all-dev libftdi1-dev
+          sudo apt-get install -y libboost-all-dev libftdi1-dev libudev-dev
 
       - name: Create build directory and build
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC=ON
           cmake --build .
 
       - name: Upload executable
