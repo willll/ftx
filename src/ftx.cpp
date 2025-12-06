@@ -32,6 +32,12 @@
 #include <iomanip>
 #include <string>
 #include <csignal>
+#include <cstring>
+
+#ifdef FTX_DEBUG_BUILD
+#include <unistd.h>
+#include <execinfo.h>
+#endif
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
@@ -43,6 +49,30 @@
 
 const int VID = 0x0403;
 const int PID = 0x6001;
+
+/**
+ * @brief Signal handler for critical errors that should cause a core dump.
+ * @param sig The signal number.
+ */
+void CoreDumpSignalHandler(int sig) {
+    std::cerr << "\nCritical error: Caught signal " << sig << " (" << strsignal(sig) << ").\n";
+
+#ifdef FTX_DEBUG_BUILD
+    std::cerr << "Call stack:\n";
+    const int MAX_STACK_FRAMES = 128;
+    void *buffer[MAX_STACK_FRAMES];
+    int nptrs = backtrace(buffer, MAX_STACK_FRAMES);
+    backtrace_symbols_fd(buffer, nptrs, STDERR_FILENO);
+#else
+    std::cerr << "Program was not built in Debug mode. No call stack available.\n";
+#endif
+
+    // Unregister our handler and fall back to the default action
+    signal(sig, SIG_DFL);
+
+    // Re-raise the signal to trigger the default handler (which should include core dump)
+    raise(sig);
+}
 
 /**
  * @brief Print usage instructions for the CLI.
@@ -205,9 +235,12 @@ int main(int argc, char *argv[])
         signal(SIGTERM, ftdi::Signal);
     #ifndef _WIN32
         signal(SIGQUIT, ftdi::Signal);
-        signal(SIGKILL, ftdi::Signal);
     #endif
-        signal(SIGSEGV, ftdi::Signal);
+        signal(SIGSEGV, CoreDumpSignalHandler);
+        signal(SIGABRT, CoreDumpSignalHandler);
+        signal(SIGFPE, CoreDumpSignalHandler);
+        signal(SIGILL, CoreDumpSignalHandler);
+        signal(SIGBUS, CoreDumpSignalHandler);
 
         switch (args.command) {
             case CommandLineArgs::DOWNLOAD:

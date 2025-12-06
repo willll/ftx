@@ -5,8 +5,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Set default build type to Debug if not specified
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Debug)
+  message(STATUS "No build type specified; defaulting to Debug.")
+endif()
+
 # Always generate compile_commands.json for static analysis tools
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(UNIX AND NOT APPLE AND NOT WIN32)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+endif()
 
 option(BUILD_STATIC "Build a statically-linked executable (requires static libs)" OFF)
 
@@ -91,6 +101,9 @@ if((DEFINED MAKE_BUILD_TYPE AND "$<LOWER_CASE:${MAKE_BUILD_TYPE}>" STREQUAL "DEB
   message(STATUS "MAKE_BUILD_TYPE=DEBUG detected; adding NDEBUG definition to ftx")
   target_compile_definitions(ftx PRIVATE NDEBUG)
 endif()
+
+# Define FTX_DEBUG_BUILD for debug builds to conditionally enable features
+target_compile_definitions(ftx PRIVATE $<$<CONFIG:Debug>:FTX_DEBUG_BUILD>)
 
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
