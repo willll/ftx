@@ -31,8 +31,12 @@
 
 #include <ftdi.h>
 #include <string>
+#include <atomic>
 
 namespace ftdi {
+
+// Global interrupt flag
+extern std::atomic<bool> g_interrupt_flag;
 
 // Global FTDI device context
 extern struct ftdi_context g_Device;

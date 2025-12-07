@@ -46,6 +46,8 @@ namespace ftdi {
 
 // FTDI device context shared across the module
 struct ftdi_context g_Device = {0};
+// Global interrupt flag
+std::atomic<bool> g_interrupt_flag(false);
 
 /**
  * @brief Initialize FTDI device communication.
@@ -100,6 +102,8 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
         }
         else
         {
+            g_Device.usb_read_timeout = 500;
+            g_Device.usb_write_timeout = 500;
             // Step 6: Purge the FTDI device buffers
             status = ftdi_tcioflush(&g_Device);
             if (status < 0)
@@ -279,14 +283,14 @@ void DoConsole(bool acknowledge)
     const unsigned char ackByte = 0x06;
 
     // Step 5: Continuously read data from the device
-    while (status >= 0)
+    while (status >= 0 && !g_interrupt_flag)
     {
         // Step 6: Read data into the buffer
         status = ftdi_read_data(&g_Device, pFileBuffer.get(), RecvBufSize);
 
         //cdbg << "[DoConsole] Read status: " << status << " bytes" << std::endl;
 
-        if (status < 0)
+        if (status < 0 && !g_interrupt_flag)
         {
             // Step 7: Handle error if reading data fails
             std::cerr << "[DoConsole] Read data error: " << ftdi_get_error_string(&g_Device) << std::endl;
@@ -377,10 +381,10 @@ void Signal(int sig)
 {
     // Step 1: Log the caught signal
     std::cout << "\n[Signal] Caught signal " << sig << ", exiting..." << std::endl;
-    // Step 2: Exit the program. The `atexit` handler registered in `main`
-    // will call `CloseComms` to perform a clean shutdown. This avoids a
-    // double-free error from calling cleanup logic both here and via atexit.
-    std::exit(EXIT_SUCCESS);
+    // Step 2: Set the global interrupt flag to signal the main loop to exit.
+    // This allows for a graceful shutdown, preventing race conditions and
+    // ensuring cleanup is handled correctly by the main program flow.
+    g_interrupt_flag = true;
 }
 
 } // namespace ftdi
