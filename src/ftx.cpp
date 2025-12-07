@@ -34,6 +34,15 @@
 #include <csignal>
 #include <cstring>
 
+#ifdef _WIN32
+// Dummy strsignal for Windows
+const char* strsignal(int sig) {
+    static char buf[32];
+    sprintf(buf, "Signal %d (Windows)", sig);
+    return buf;
+}
+#endif
+
 #ifdef FTX_DEBUG_BUILD
 #include <unistd.h>
 #include <execinfo.h>
