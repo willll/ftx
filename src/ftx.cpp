@@ -235,12 +235,12 @@ int main(int argc, char *argv[])
         signal(SIGTERM, ftdi::Signal);
     #ifndef _WIN32
         signal(SIGQUIT, ftdi::Signal);
+        signal(SIGBUS, CoreDumpSignalHandler);
     #endif
         signal(SIGSEGV, CoreDumpSignalHandler);
         signal(SIGABRT, CoreDumpSignalHandler);
         signal(SIGFPE, CoreDumpSignalHandler);
         signal(SIGILL, CoreDumpSignalHandler);
-        signal(SIGBUS, CoreDumpSignalHandler);
 
         switch (args.command) {
             case CommandLineArgs::DOWNLOAD:
