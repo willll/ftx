@@ -164,7 +164,7 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
             if (error)
             {
                 ftdi_usb_close(&g_Device);
-                ftdi_free(&g_Device);
+                ftdi_deinit(&g_Device);
             }
         }
     }
@@ -194,7 +194,7 @@ void CloseComms()
     }
     // Step 4: Close the FTDI device
     ftdi_usb_close(&g_Device);
-    ftdi_free(&g_Device);
+    ftdi_deinit(&g_Device);
     // Step 5: Log successful closure
     std::cout << "[CloseComms] FTDI device closed." << std::endl;
 }
@@ -284,7 +284,7 @@ void DoConsole(bool acknowledge)
         // Step 6: Read data into the buffer
         status = ftdi_read_data(&g_Device, pFileBuffer.get(), RecvBufSize);
 
-        cdbg << "[DoConsole] Read status: " << status << " bytes" << std::endl;
+        //cdbg << "[DoConsole] Read status: " << status << " bytes" << std::endl;
 
         if (status < 0)
         {
@@ -377,9 +377,9 @@ void Signal(int sig)
 {
     // Step 1: Log the caught signal
     std::cout << "\n[Signal] Caught signal " << sig << ", exiting..." << std::endl;
-    // Step 2: Close the FTDI device communication
-    ftdi::CloseComms();
-    // Step 3: Exit the program
+    // Step 2: Exit the program. The `atexit` handler registered in `main`
+    // will call `CloseComms` to perform a clean shutdown. This avoids a
+    // double-free error from calling cleanup logic both here and via atexit.
     std::exit(EXIT_SUCCESS);
 }
 
