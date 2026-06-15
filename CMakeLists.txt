@@ -30,7 +30,7 @@ else()
 endif()
 
 if(POLICY CMP0167)
-  cmake_policy(SET CMP0167 NEW)
+  cmake_policy(SET CMP0167 OLD)
 endif()
 
 find_package(Boost REQUIRED COMPONENTS program_options filesystem)
@@ -64,6 +64,10 @@ endif()
 add_executable(ftx
   src/ftx.cpp
   src/ftdi.cpp
+  src/ftdi_init.cpp
+  src/ftdi_discovery.cpp
+  src/ftdi_console.cpp
+  src/ftdi_gdb.cpp
   src/xfer.cpp
   src/crc.cpp
 )

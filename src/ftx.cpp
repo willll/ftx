@@ -96,6 +96,7 @@ void PrintUsage(const char* progName) {
     std::cout << "  -p  <PID>                     Device PID (Default 0x6001)\n";
     std::cout << "  -s  <Serial>                  Device Serial (Default : Will match VID and PID with an FTDI serial)\n";
     std::cout << "  -c                            Run debug console\n";
+    std::cout << "  -g  [port]                    Run GDB Remote Serial Protocol stub (Default port 1234)\n";
     std::cout << "  -l                            List available FTDI devices\n";
     std::cout << "  -help                         Help\n\n";
     std::cout << "Commands:\n";
@@ -120,6 +121,8 @@ struct CommandLineArgs {
     int pid = PID; ///< USB Product ID
     std::string serial = ""; ///< Device Serial
     bool console = false; ///< Run debug console
+    bool gdb_stub = false; ///< Run GDB stub
+    uint16_t gdb_port = 1234; ///< GDB stub port
     enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     unsigned int address = 0; ///< Address for transfer/execute
@@ -142,6 +145,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("s,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
         ("l,l", "List available FTDI devices")
         ("c,c", "Run debug console")
+        ("g,g", po::value<std::string>()->implicit_value("1234"), "Run GDB stub [optional port]")
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
@@ -180,6 +184,16 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     }
     if (vm.count("c")) {
         args.console = true;
+    }
+    if (vm.count("g")) {
+        args.gdb_stub = true;
+        std::string port_str = vm["g"].as<std::string>();
+        try {
+            args.gdb_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing GDB port: " << e.what() << std::endl;
+            args.gdb_port = 1234;
+        }
     }
     if (vm.count("d")) {
         auto vals = vm["d"].as<std::vector<std::string>>();
@@ -228,7 +242,7 @@ int main(int argc, char *argv[])
 {
     CommandLineArgs args = parse_args(argc, argv);
 
-    if (args.command == CommandLineArgs::NONE && !args.console) {
+    if (args.command == CommandLineArgs::NONE && !args.console && !args.gdb_stub) {
         PrintUsage(argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -269,6 +283,9 @@ int main(int argc, char *argv[])
                 break;
             default:
                 break;
+        }
+        if (args.gdb_stub) {
+            return ftdi::DoGDBStub(args.gdb_port);
         }
         if (args.console) {
             ftdi::DoConsole();

@@ -75,4 +75,11 @@ void Signal(int sig);
  */
 void DoConsole(bool acknowledge = false);
 
+/**
+ * @brief Start GDB Remote Serial Protocol stub for remote debugging.
+ * @param port TCP port to listen on (default 1234).
+ * @return Exit status code.
+ */
+int DoGDBStub(uint16_t port = 1234);
+
 } // namespace ftdi

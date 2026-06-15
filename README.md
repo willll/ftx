@@ -88,6 +88,7 @@ make
 - `-v <VID>`: Device VID (default: 0x0403)
 - `-p <PID>`: Device PID (default: 0x6001)
 - `-c`      : Run debug console
+- `-g [port]`: Run GDB Remote Serial Protocol stub (default port: 1234)
 
 ### Commands
 
@@ -127,6 +128,125 @@ Start debug console:
 ```sh
 ./ftx -c
 ```
+
+## GDB Remote Debugging
+
+ftx implements a **GDB Remote Serial Protocol (RSP)** stub to enable remote debugging of Saturn cartridges using standard GDB tools.
+
+### Starting the GDB Stub
+
+Listen on the default port (1234):
+
+```sh
+./ftx -g
+```
+
+Or specify a custom port:
+
+```sh
+./ftx -g 2345
+```
+
+### Connecting from GDB
+
+In a separate terminal, connect to the stub:
+
+```sh
+gdb your-binary
+(gdb) target remote localhost:1234
+```
+
+### Supported Commands
+
+The stub implements core GDB Remote Serial Protocol commands:
+
+- `g` — Read all registers
+- `m` — Read memory (format: `mADDR,LENGTH`)
+- `M` — Write memory (format: `MADDR,LENGTH:data`)
+- `c` — Continue execution
+- `s` — Single step
+- `?` — Query halt reason
+- `q` — General queries (e.g., `qAttached`)
+- `Q` — General set operations
+
+### Protocol Details
+
+The GDB Remote Serial Protocol uses ASCII-based packet framing:
+
+```
+$command#checksum
+```
+
+Where:
+- `$` — packet start marker
+- `command` — RSP command string
+- `#` — checksum marker
+- `checksum` — two-digit hex XOR of command bytes
+
+The stub validates checksums and responds with:
+- `+` — ACK (packet received successfully)
+- `-` — NAK (packet rejected, retry)
+- `$response#checksum` — Response packet
+
+### Implementation Details
+
+The stub runs in a single thread, listening for GDB connections on the specified TCP port. Each connected client runs the RSP command loop synchronously. Commands are translated to Saturn debugger operations (register reads, memory access, execution control) and responses are marshaled back to GDB format.
+
+Currently, register and memory access operations return placeholder data; real device integration requires parsing Saturn firmware debug interfaces.
+
+### Debug Traces
+
+The project includes extensive debug tracing. When built in Debug mode, traces are emitted to stdout with the `[DoConsole][dbg]` prefix. Key traces include:
+
+- `stdin reader thread started/exiting` — thread lifecycle events
+- `stdin got byte=0xNN` — every byte received from terminal input
+- `stdin line enqueued` — complete line ready to send to device
+- `ftdi_read_data status=N` — device reads (0 = no data, >0 = bytes read, <0 = error)
+- `ftdi_write_data wrote=N` — successful write chunks to device
+
+To see these traces, build with `-DCMAKE_BUILD_TYPE=Debug`:
+
+```sh
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make
+```
+
+In release builds (`-DCMAKE_BUILD_TYPE=Release` or unspecified), debug traces are compiled out entirely via the `NDEBUG` macro.
+
+### Error Handling
+
+- Device initialization includes automatic recovery attempts on buffer purge failures.
+- On console exit (Ctrl+C), the stdin reader thread stops within 50ms and the process exits cleanly.
+- Read/write errors to the device are reported to stderr and terminate console mode.
+
+## Project Structure
+
+The source is organized into focused modules:
+
+- **src/ftdi.cpp** — Shared FTDI device context and global interrupt flag
+- **src/ftdi_init.cpp** — Device initialization, configuration, and cleanup (`InitComms`, `CloseComms`)
+- **src/ftdi_discovery.cpp** — Device enumeration (`ListDevices`)
+- **src/ftdi_console.cpp** — Interactive console mode and signal handling (`DoConsole`, `Signal`)
+- **src/ftx.cpp** — Main entry point and command-line parsing
+- **src/xfer.cpp** — Data transfer operations (upload, download, execute)
+- **src/crc.cpp** — CRC-8 checksum computation
+- **include/log.hpp** — Deduplicating debug logger with release-mode no-op
+
+### Build System
+
+The project uses CMake 3.10+ with the following features:
+
+- `CMP0167` policy enabled for modern Boost discovery
+- Automatic static/dynamic linking detection for Linux
+- Separate compile_commands.json generation for static analysis tools (cppcheck)
+- C++17 standard requirement with feature-based target setup
+
+In console mode, communication is bidirectional on supported terminals:
+
+- Device output is printed to stdout.
+- Typed host input is buffered line-by-line (press Enter to send a complete line).
+- The stdin reader runs in a dedicated thread with a 50ms poll timeout, allowing clean exit on Ctrl+C.
+- Non-printable device output is displayed in hex notation (e.g., `[0xfe]`).
 
 ## License
 
