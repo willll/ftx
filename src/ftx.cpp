@@ -43,7 +43,7 @@ const char* strsignal(int sig) {
 }
 #endif
 
-#ifdef FTX_DEBUG_BUILD
+#if defined(FTX_DEBUG_BUILD) && !defined(_WIN32)
 #include <unistd.h>
 #include <execinfo.h>
 #endif
@@ -66,12 +66,14 @@ const int PID = 0x6001;
 void CoreDumpSignalHandler(int sig) {
     std::cerr << "\nCritical error: Caught signal " << sig << " (" << strsignal(sig) << ").\n";
 
-#ifdef FTX_DEBUG_BUILD
+#if defined(FTX_DEBUG_BUILD) && !defined(_WIN32)
     std::cerr << "Call stack:\n";
     const int MAX_STACK_FRAMES = 128;
     void *buffer[MAX_STACK_FRAMES];
     int nptrs = backtrace(buffer, MAX_STACK_FRAMES);
     backtrace_symbols_fd(buffer, nptrs, STDERR_FILENO);
+#elif defined(FTX_DEBUG_BUILD)
+    std::cerr << "Call stack capture is unavailable on Windows builds.\n";
 #else
     std::cerr << "Program was not built in Debug mode. No call stack available.\n";
 #endif

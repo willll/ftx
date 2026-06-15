@@ -29,14 +29,19 @@
 
 #include <cctype>
 #include <chrono>
+#ifdef _WIN32
+#include <conio.h>
+#endif
 #include <deque>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#ifndef _WIN32
 #include <poll.h>
-#include <thread>
 #include <unistd.h>
+#endif
+#include <thread>
 #include <vector>
 
 #include "log.hpp"
@@ -72,10 +77,27 @@ void DoConsole(bool acknowledge)
         std::string pendingLine;
         cdbg << "[DoConsole][dbg] stdin reader thread started" << std::endl;
 
-        // Use poll()+read() with a short timeout so the thread can exit quickly
-        // when g_interrupt_flag is set.
+        // Poll stdin with a short timeout so the thread can exit quickly when
+        // g_interrupt_flag is set.
         while (!g_interrupt_flag)
         {
+#ifdef _WIN32
+            if (!_kbhit())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+
+            const int rawInput = _getch();
+            if (rawInput < 0)
+            {
+                cdbg << "[DoConsole][dbg] stdin read failed, stopping reader thread" << std::endl;
+                g_interrupt_flag = true;
+                break;
+            }
+
+            unsigned char input = static_cast<unsigned char>(rawInput);
+#else
             struct pollfd stdinPollFd;
             stdinPollFd.fd = STDIN_FILENO;
             stdinPollFd.events = POLLIN;
@@ -121,6 +143,7 @@ void DoConsole(bool acknowledge)
                 g_interrupt_flag = true;
                 break;
             }
+#endif
 
             cdbg << "[DoConsole][dbg] stdin got byte=0x" << std::hex << std::setw(2)
                  << std::setfill('0') << static_cast<int>(input) << std::dec << std::endl;

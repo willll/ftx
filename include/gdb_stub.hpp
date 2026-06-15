@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "platform.hpp"
+
 /**
  * GDB Remote Serial Protocol (RSP) stub.
  * Implements a subset of GDB remote debugging protocol for Saturn cartridge communication.
@@ -117,27 +119,27 @@ public:
     
 private:
     uint16_t port_;
-    int listen_socket_;
+    platform::socket_handle listen_socket_;
     
     /**
      * Handle a single GDB client connection
      */
-    void handle_client(int client_fd);
+    void handle_client(platform::socket_handle client_fd);
     
     /**
      * Send RSP packet (with +/- ack handling)
      */
-    bool send_packet(int fd, const std::string& data);
+    bool send_packet(platform::socket_handle fd, const std::string& data);
     
     /**
      * Receive RSP packet with timeout
      */
-    bool receive_packet(int fd, RSPPacket& out_packet);
+    bool receive_packet(platform::socket_handle fd, RSPPacket& out_packet);
     
     /**
      * Process single command and send response
      */
-    bool process_command(int fd, const RSPPacket& packet);
+    bool process_command(platform::socket_handle fd, const RSPPacket& packet);
 };
 
 }  // namespace gdb_stub

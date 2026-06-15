@@ -2,13 +2,13 @@
 #include "ftdi.hpp"
 #include "log.hpp"
 
+#ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
-#include <poll.h>
-#include <signal.h>
+#endif
+#include <csignal>
 #include <cstring>
 #include <cctype>
 #include <sstream>
@@ -218,37 +218,36 @@ std::string GDBCommandParser::format_response(const DeviceRequest& request,
 // =============================================================================
 
 GDBStub::GDBStub(uint16_t port) 
-    : port_(port), listen_socket_(-1) {
+    : port_(port), listen_socket_(platform::invalid_socket) {
 }
 
 GDBStub::~GDBStub() {
-    if (listen_socket_ >= 0) {
-        close(listen_socket_);
+    if (listen_socket_ != platform::invalid_socket) {
+        platform::close_socket(listen_socket_);
     }
 }
 
-bool GDBStub::send_packet(int fd, const std::string& data) {
+bool GDBStub::send_packet(platform::socket_handle fd, const std::string& data) {
     std::string packet = RSPCodec::encode_packet(data);
     
     CDBG_LOG_ON_CHANGE("gdb_send", "RSP <- " << packet);
     
-    ssize_t written = write(fd, packet.c_str(), packet.length());
+    int written = platform::socket_write(fd, packet.c_str(), packet.length());
     if (written < 0) {
-        cdbg << "[GDB] write error: " << strerror(errno) << std::endl;
+        cdbg << "[GDB] write error: " << platform::last_socket_error_message() << std::endl;
         return false;
     }
     
     // Wait for ACK ('+') or NAK ('-')
     char ack;
-    struct pollfd pfd = {fd, POLLIN, 0};
-    int poll_result = poll(&pfd, 1, 1000);  // 1 second timeout
+    int poll_result = platform::wait_for_socket_readable(fd, 1000);  // 1 second timeout
     
     if (poll_result <= 0) {
         CDBG_LOG_ON_CHANGE("gdb_no_ack", "RSP: no ACK received (timeout)");
         return false;
     }
     
-    ssize_t read_result = read(fd, &ack, 1);
+    int read_result = platform::socket_read(fd, &ack, 1);
     if (read_result != 1) {
         return false;
     }
@@ -264,20 +263,18 @@ bool GDBStub::send_packet(int fd, const std::string& data) {
     return true;
 }
 
-bool GDBStub::receive_packet(int fd, RSPPacket& out_packet) {
+bool GDBStub::receive_packet(platform::socket_handle fd, RSPPacket& out_packet) {
     std::string raw_packet;
     char byte;
-    
-    struct pollfd pfd = {fd, POLLIN, 0};
-    
+
     // Wait for start of packet ('$')
     while (true) {
-        int poll_result = poll(&pfd, 1, 1000);
+        int poll_result = platform::wait_for_socket_readable(fd, 1000);
         if (poll_result <= 0) {
             return false;  // Timeout
         }
         
-        ssize_t n = read(fd, &byte, 1);
+        int n = platform::socket_read(fd, &byte, 1);
         if (n != 1) {
             return false;
         }
@@ -290,7 +287,7 @@ bool GDBStub::receive_packet(int fd, RSPPacket& out_packet) {
     
     // Read until '#'
     while (true) {
-        ssize_t n = read(fd, &byte, 1);
+        int n = platform::socket_read(fd, &byte, 1);
         if (n != 1) {
             return false;
         }
@@ -304,7 +301,7 @@ bool GDBStub::receive_packet(int fd, RSPPacket& out_packet) {
     
     // Read checksum (2 hex digits)
     char checksum_buf[3];
-    ssize_t n = read(fd, checksum_buf, 2);
+    int n = platform::socket_read(fd, checksum_buf, 2);
     if (n != 2) {
         return false;
     }
@@ -318,16 +315,18 @@ bool GDBStub::receive_packet(int fd, RSPPacket& out_packet) {
     // Parse and validate
     if (!RSPCodec::parse_packet(full_packet, out_packet)) {
         // Send NAK
-        write(fd, "-", 1);
+        const char nak = '-';
+        platform::socket_write(fd, &nak, 1);
         return false;
     }
     
     // Send ACK
-    write(fd, "+", 1);
+    const char ack = '+';
+    platform::socket_write(fd, &ack, 1);
     return true;
 }
 
-bool GDBStub::process_command(int fd, const RSPPacket& packet) {
+bool GDBStub::process_command(platform::socket_handle fd, const RSPPacket& packet) {
     DeviceRequest device_req;
     
     // Parse the command
@@ -390,7 +389,7 @@ bool GDBStub::process_command(int fd, const RSPPacket& packet) {
     return send_packet(fd, "E02");
 }
 
-void GDBStub::handle_client(int client_fd) {
+void GDBStub::handle_client(platform::socket_handle client_fd) {
     cdbg << "[GDB] client connected" << std::endl;
     
     RSPPacket packet;
@@ -400,23 +399,39 @@ void GDBStub::handle_client(int client_fd) {
         }
     }
     
-    close(client_fd);
+    platform::close_socket(client_fd);
     cdbg << "[GDB] client disconnected" << std::endl;
 }
 
 int GDBStub::run() {
+#ifdef _WIN32
+    WSADATA wsa_data{};
+    const int wsa_status = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+    if (wsa_status != 0) {
+        cdbg << "[GDB] WSAStartup failed: " << wsa_status << std::endl;
+        return 1;
+    }
+#endif
+
     // Create listening socket
     listen_socket_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_socket_ < 0) {
-        cdbg << "[GDB] socket creation failed: " << strerror(errno) << std::endl;
+    if (listen_socket_ == platform::invalid_socket) {
+        cdbg << "[GDB] socket creation failed: " << platform::last_socket_error_message() << std::endl;
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return 1;
     }
     
     // Allow reuse of port
     int reuse = 1;
-    if (setsockopt(listen_socket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        cdbg << "[GDB] setsockopt failed: " << strerror(errno) << std::endl;
-        close(listen_socket_);
+    if (platform::set_socket_reuse_address(listen_socket_, reuse) < 0) {
+        cdbg << "[GDB] setsockopt failed: " << platform::last_socket_error_message() << std::endl;
+        platform::close_socket(listen_socket_);
+        listen_socket_ = platform::invalid_socket;
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return 1;
     }
     
@@ -428,15 +443,23 @@ int GDBStub::run() {
     addr.sin_port = htons(port_);
     
     if (bind(listen_socket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        cdbg << "[GDB] bind failed: " << strerror(errno) << std::endl;
-        close(listen_socket_);
+        cdbg << "[GDB] bind failed: " << platform::last_socket_error_message() << std::endl;
+        platform::close_socket(listen_socket_);
+        listen_socket_ = platform::invalid_socket;
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return 1;
     }
     
     // Listen
     if (listen(listen_socket_, 1) < 0) {
-        cdbg << "[GDB] listen failed: " << strerror(errno) << std::endl;
-        close(listen_socket_);
+        cdbg << "[GDB] listen failed: " << platform::last_socket_error_message() << std::endl;
+        platform::close_socket(listen_socket_);
+        listen_socket_ = platform::invalid_socket;
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return 1;
     }
     
@@ -444,27 +467,35 @@ int GDBStub::run() {
     
     // Accept connections
     while (!ftdi::g_interrupt_flag) {
-        struct pollfd pfd = {listen_socket_, POLLIN, 0};
-        int poll_result = poll(&pfd, 1, 1000);  // 1 second timeout
+        int poll_result = platform::wait_for_socket_readable(listen_socket_, 1000);  // 1 second timeout
         
         if (poll_result <= 0) {
             continue;
         }
         
         struct sockaddr_in client_addr;
+#ifdef _WIN32
+        int client_len = sizeof(client_addr);
+#else
         socklen_t client_len = sizeof(client_addr);
+#endif
         
-        int client_fd = accept(listen_socket_, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd < 0) {
-            cdbg << "[GDB] accept failed: " << strerror(errno) << std::endl;
+        platform::socket_handle client_fd = accept(listen_socket_, (struct sockaddr*)&client_addr, &client_len);
+        if (client_fd == platform::invalid_socket) {
+            cdbg << "[GDB] accept failed: " << platform::last_socket_error_message() << std::endl;
             continue;
         }
         
         handle_client(client_fd);
     }
     
-    close(listen_socket_);
+    platform::close_socket(listen_socket_);
+    listen_socket_ = platform::invalid_socket;
     cdbg << "[GDB] stub shutdown" << std::endl;
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
     
     return 0;
 }
