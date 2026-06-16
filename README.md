@@ -88,7 +88,8 @@ make
 - `-v <VID>`: Device VID (default: 0x0403)
 - `-p <PID>`: Device PID (default: 0x6001)
 - `-c`      : Run debug console
-- `-g [port]`: Run GDB Remote Serial Protocol stub (default port: 1234)
+- `-g [port]`: Run raw TCP<->FTDI proxy (default port: 1234)
+- `-verbose`: Print traced RSP packets as `GDB>...` and `Target>...` lines
 
 ### Commands
 
@@ -129,70 +130,40 @@ Start debug console:
 ./ftx -c
 ```
 
-## GDB Remote Debugging
+## TCP Proxy Mode
 
-ftx implements a **GDB Remote Serial Protocol (RSP)** stub to enable remote debugging of Saturn cartridges using standard GDB tools.
+`-g` starts a raw TCP proxy. All bytes received from the TCP client are forwarded directly to the FTDI device, and all bytes read from FTDI are forwarded back to the TCP client.
 
-### Starting the GDB Stub
-
-Listen on the default port (1234):
+Start the proxy on the default port (1234):
 
 ```sh
 ./ftx -g
 ```
 
-Or specify a custom port:
+Start the proxy with verbose packet tracing:
+
+```sh
+./ftx -g 1234 -verbose
+```
+
+Or on a custom port:
 
 ```sh
 ./ftx -g 2345
 ```
 
-### Connecting from GDB
-
-In a separate terminal, connect to the stub:
+Example with netcat:
 
 ```sh
-gdb your-binary
-(gdb) target remote localhost:1234
+nc 127.0.0.1 1234
 ```
 
-### Supported Commands
+Use this mode when your client already speaks the cartridge/debug protocol and you only need transport bridging over TCP.
 
-The stub implements core GDB Remote Serial Protocol commands:
+When `-verbose` is enabled, traced packet lines are printed with one packet per line:
 
-- `g` — Read all registers
-- `m` — Read memory (format: `mADDR,LENGTH`)
-- `M` — Write memory (format: `MADDR,LENGTH:data`)
-- `c` — Continue execution
-- `s` — Single step
-- `?` — Query halt reason
-- `q` — General queries (e.g., `qAttached`)
-- `Q` — General set operations
-
-### Protocol Details
-
-The GDB Remote Serial Protocol uses ASCII-based packet framing:
-
-```
-$command#checksum
-```
-
-Where:
-- `$` — packet start marker
-- `command` — RSP command string
-- `#` — checksum marker
-- `checksum` — two-digit hex XOR of command bytes
-
-The stub validates checksums and responds with:
-- `+` — ACK (packet received successfully)
-- `-` — NAK (packet rejected, retry)
-- `$response#checksum` — Response packet
-
-### Implementation Details
-
-The stub runs in a single thread, listening for GDB connections on the specified TCP port. Each connected client runs the RSP command loop synchronously. Commands are translated to Saturn debugger operations (register reads, memory access, execution control) and responses are marshaled back to GDB format.
-
-Currently, register and memory access operations return placeholder data; real device integration requires parsing Saturn firmware debug interfaces.
+- `GDB>$...` for packets received from the TCP client
+- `Target>$...` for packets received from the FTDI target
 
 ### Debug Traces
 
