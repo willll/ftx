@@ -96,7 +96,8 @@ void PrintUsage(const char* progName) {
     std::cout << "  -p  <PID>                     Device PID (Default 0x6001)\n";
     std::cout << "  -s  <Serial>                  Device Serial (Default : Will match VID and PID with an FTDI serial)\n";
     std::cout << "  -c                            Run debug console\n";
-    std::cout << "  -g  [port]                    Run GDB Remote Serial Protocol stub (Default port 1234)\n";
+    std::cout << "  -g  [port]                    Run raw TCP<->FTDI proxy (Default port 1234)\n";
+    std::cout << "  -verbose                      Print traced RSP packets as GDB>/Target> lines\n";
     std::cout << "  -l                            List available FTDI devices\n";
     std::cout << "  -help                         Help\n\n";
     std::cout << "Commands:\n";
@@ -121,8 +122,9 @@ struct CommandLineArgs {
     int pid = PID; ///< USB Product ID
     std::string serial = ""; ///< Device Serial
     bool console = false; ///< Run debug console
-    bool gdb_stub = false; ///< Run GDB stub
-    uint16_t gdb_port = 1234; ///< GDB stub port
+    bool tcp_proxy = false; ///< Run raw TCP proxy
+    uint16_t tcp_port = 1234; ///< TCP proxy port
+    bool verbose = false; ///< Verbose proxy tracing
     enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     unsigned int address = 0; ///< Address for transfer/execute
@@ -145,7 +147,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("s,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
         ("l,l", "List available FTDI devices")
         ("c,c", "Run debug console")
-        ("g,g", po::value<std::string>()->implicit_value("1234"), "Run GDB stub [optional port]")
+        ("g,g", po::value<std::string>()->implicit_value("1234"), "Run raw TCP proxy [optional port]")
+        ("verbose", "Print traced RSP packets as GDB>/Target> lines")
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
@@ -156,7 +159,21 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     po::variables_map vm;
 
     try {
-        auto parsed = po::command_line_parser(argc, argv)
+        // Normalize legacy single-dash long options so "-verbose" and "-help"
+        // are not misparsed as clustered short options (e.g. -v erbose).
+        std::vector<std::string> normalizedArgs;
+        normalizedArgs.reserve(static_cast<size_t>(argc));
+        for (int i = 0; i < argc; ++i) {
+            std::string token = argv[i] ? argv[i] : "";
+            if (token == "-verbose") {
+                token = "--verbose";
+            } else if (token == "-help") {
+                token = "--help";
+            }
+            normalizedArgs.push_back(token);
+        }
+
+        auto parsed = po::command_line_parser(normalizedArgs)
                   .options(desc)
                   .style(po::command_line_style::unix_style |
                          po::command_line_style::allow_short)
@@ -186,14 +203,17 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         args.console = true;
     }
     if (vm.count("g")) {
-        args.gdb_stub = true;
+        args.tcp_proxy = true;
         std::string port_str = vm["g"].as<std::string>();
         try {
-            args.gdb_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
+            args.tcp_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
         } catch (const std::exception& e) {
             std::cerr << "Error parsing GDB port: " << e.what() << std::endl;
-            args.gdb_port = 1234;
+            args.tcp_port = 1234;
         }
+    }
+    if (vm.count("verbose")) {
+        args.verbose = true;
     }
     if (vm.count("d")) {
         auto vals = vm["d"].as<std::vector<std::string>>();
@@ -242,7 +262,7 @@ int main(int argc, char *argv[])
 {
     CommandLineArgs args = parse_args(argc, argv);
 
-    if (args.command == CommandLineArgs::NONE && !args.console && !args.gdb_stub) {
+    if (args.command == CommandLineArgs::NONE && !args.console && !args.tcp_proxy) {
         PrintUsage(argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -284,8 +304,8 @@ int main(int argc, char *argv[])
             default:
                 break;
         }
-        if (args.gdb_stub) {
-            return ftdi::DoGDBStub(args.gdb_port);
+        if (args.tcp_proxy) {
+            return ftdi::DoTcpProxy(args.tcp_port, args.verbose);
         }
         if (args.console) {
             ftdi::DoConsole();
