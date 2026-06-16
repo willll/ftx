@@ -76,10 +76,11 @@ void Signal(int sig);
 void DoConsole(bool acknowledge = false);
 
 /**
- * @brief Start GDB Remote Serial Protocol stub for remote debugging.
+ * @brief Start a raw TCP proxy that forwards bytes between TCP and FTDI.
  * @param port TCP port to listen on (default 1234).
+ * @param verbose If true, prints traced RSP commands with GDB>/Target> prefixes.
  * @return Exit status code.
  */
-int DoGDBStub(uint16_t port = 1234);
+int DoTcpProxy(uint16_t port = 1234, bool verbose = false);
 
 } // namespace ftdi

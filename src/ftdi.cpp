@@ -29,7 +29,6 @@
 
 #include <ftdi.h>
 #include "ftdi.hpp"
-#include "gdb_stub.hpp"
 
 namespace ftdi {
 
@@ -37,13 +36,5 @@ namespace ftdi {
 struct ftdi_context g_Device = {0};
 // Global interrupt flag
 std::atomic<bool> g_interrupt_flag(false);
-
-/**
- * @brief Wrapper to start GDB stub
- */
-int DoGDBStub(uint16_t port) {
-    gdb_stub::GDBStub stub(port);
-    return stub.run();
-}
 
 } // namespace ftdi
