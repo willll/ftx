@@ -1,472 +1,280 @@
-#include "gdb_stub.hpp"
 #include "ftdi.hpp"
 #include "log.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <poll.h>
-#include <signal.h>
+
+#include <cerrno>
+#include <algorithm>
 #include <cstring>
-#include <cctype>
-#include <sstream>
-#include <iomanip>
+#include <string>
 
-namespace gdb_stub {
+namespace {
 
-// =============================================================================
-// RSPCodec Implementation
-// =============================================================================
-
-uint8_t RSPCodec::calculate_checksum(const std::string& data) {
-    uint8_t checksum = 0;
-    for (char c : data) {
-        checksum ^= static_cast<uint8_t>(c);
+bool write_all_socket(int fd, const unsigned char* data, size_t len)
+{
+    size_t sent = 0;
+    while (sent < len)
+    {
+        const ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            return false;
+        }
+        if (n == 0)
+        {
+            return false;
+        }
+        sent += static_cast<size_t>(n);
     }
-    return checksum;
-}
-
-bool RSPCodec::parse_packet(const std::string& raw, RSPPacket& out_packet) {
-    // Expected format: $command#checksum
-    if (raw.size() < 4 || raw[0] != '$' || raw.find('#') == std::string::npos) {
-        CDBG_LOG_ON_CHANGE("gdb_parse_invalid", "RSP: malformed packet: " << raw);
-        return false;
-    }
-    
-    size_t hash_pos = raw.find('#');
-    out_packet.command = raw.substr(1, hash_pos - 1);
-    
-    // Parse checksum
-    std::string checksum_hex = raw.substr(hash_pos + 1);
-    if (checksum_hex.length() != 2) {
-        return false;
-    }
-    
-    char* endptr = nullptr;
-    out_packet.checksum = static_cast<uint8_t>(strtol(checksum_hex.c_str(), &endptr, 16));
-    if (*endptr != '\0') {
-        return false;
-    }
-    
-    // Verify checksum
-    uint8_t calculated = calculate_checksum(out_packet.command);
-    if (calculated != out_packet.checksum) {
-        CDBG_LOG_ON_CHANGE("gdb_checksum_fail", 
-            "RSP: checksum mismatch (got 0x" << std::hex << (int)out_packet.checksum 
-            << ", expected 0x" << (int)calculated << std::dec << ")");
-        return false;
-    }
-    
     return true;
 }
 
-std::string RSPCodec::encode_packet(const std::string& data) {
-    uint8_t checksum = calculate_checksum(data);
-    
-    std::ostringstream oss;
-    oss << "$" << data << "#" << std::hex << std::setfill('0') << std::setw(2) << (int)checksum;
-    return oss.str();
-}
+bool write_all_ftdi(struct ftdi_context* dev, const unsigned char* data, size_t len)
+{
+    constexpr size_t kUsbChunkSize = 64;
+    constexpr int kMaxWriteRetries = 3;
 
-std::string RSPCodec::to_hex(const std::vector<uint8_t>& data) {
-    std::ostringstream oss;
-    for (uint8_t byte : data) {
-        oss << std::hex << std::setfill('0') << std::setw(2) << (int)byte;
-    }
-    return oss.str();
-}
+    size_t written_total = 0;
+    while (written_total < len)
+    {
+        const size_t chunk = std::min(kUsbChunkSize, len - written_total);
 
-bool RSPCodec::from_hex(const std::string& hex_str, std::vector<uint8_t>& out) {
-    if (hex_str.length() % 2 != 0) {
-        return false;
-    }
-    
-    out.clear();
-    for (size_t i = 0; i < hex_str.length(); i += 2) {
-        char* endptr = nullptr;
-        long byte_val = strtol(hex_str.substr(i, 2).c_str(), &endptr, 16);
-        if (*endptr != '\0' || byte_val < 0 || byte_val > 255) {
+        bool wrote_chunk = false;
+        for (int attempt = 0; attempt < kMaxWriteRetries; ++attempt)
+        {
+            const int n = ftdi_write_data(dev,
+                                          const_cast<unsigned char*>(data + written_total),
+                                          static_cast<int>(chunk));
+            if (n > 0)
+            {
+                written_total += static_cast<size_t>(n);
+                wrote_chunk = true;
+                break;
+            }
+
+            // Some devices transiently fail bulk writes; purge TX and retry.
+            if (n < 0)
+            {
+                (void)ftdi_tcioflush(dev);
+            }
+        }
+
+        if (!wrote_chunk)
+        {
             return false;
         }
-        out.push_back(static_cast<uint8_t>(byte_val));
     }
-    
     return true;
 }
 
-// =============================================================================
-// GDBCommandParser Implementation
-// =============================================================================
-
-bool GDBCommandParser::parse_command(const RSPPacket& packet, DeviceRequest& out_request) {
-    if (packet.command.empty()) {
-        return false;
+void trace_rsp_stream(const char* prefix, std::string& carry, const unsigned char* data, size_t len, bool verbose)
+{
+    if (!verbose)
+    {
+        return;
     }
-    
-    char cmd = packet.command[0];
-    std::string args = packet.command.substr(1);
-    
-    switch (cmd) {
-        case 'g':
-            // Read all registers
-            out_request.type = DeviceRequest::REG_READ;
-            return true;
-            
-        case 'm': {
-            // Read memory: mADDR,LENGTH
-            out_request.type = DeviceRequest::MEM_READ;
-            
-            size_t comma_pos = args.find(',');
-            if (comma_pos == std::string::npos) {
-                return false;
+
+    carry.append(reinterpret_cast<const char*>(data), len);
+
+    size_t pos = 0;
+    while (pos < carry.size())
+    {
+        if (carry[pos] == '$')
+        {
+            const size_t hash = carry.find('#', pos + 1);
+            if (hash == std::string::npos)
+            {
+                break;
             }
-            
-            char* endptr = nullptr;
-            out_request.address = strtoull(args.substr(0, comma_pos).c_str(), &endptr, 16);
-            if (*endptr != '\0') return false;
-            
-            out_request.length = strtoul(args.substr(comma_pos + 1).c_str(), &endptr, 16);
-            if (*endptr != '\0') return false;
-            
-            return true;
-        }
-        
-        case 'M': {
-            // Write memory: MADDR,LENGTH:data
-            out_request.type = DeviceRequest::MEM_WRITE;
-            
-            size_t comma_pos = args.find(',');
-            if (comma_pos == std::string::npos) return false;
-            
-            size_t colon_pos = args.find(':');
-            if (colon_pos == std::string::npos) return false;
-            
-            char* endptr = nullptr;
-            out_request.address = strtoull(args.substr(0, comma_pos).c_str(), &endptr, 16);
-            if (*endptr != '\0') return false;
-            
-            out_request.length = strtoul(args.substr(comma_pos + 1, colon_pos - comma_pos - 1).c_str(), &endptr, 16);
-            if (*endptr != '\0') return false;
-            
-            std::string data_hex = args.substr(colon_pos + 1);
-            if (!RSPCodec::from_hex(data_hex, out_request.data)) {
-                return false;
+            if (hash + 2 >= carry.size())
+            {
+                break;
             }
-            
-            return true;
+
+            std::cout << prefix << carry.substr(pos, hash - pos + 3) << std::endl;
+            pos = hash + 3;
+            continue;
         }
-        
-        case 'c':
-            // Continue
-            out_request.type = DeviceRequest::CONTINUE;
-            return true;
-            
-        case 's':
-            // Single step
-            out_request.type = DeviceRequest::STEP;
-            return true;
-            
-        case '?':
-            // Query halt reason
-            out_request.type = DeviceRequest::HALT_REASON;
-            return true;
-            
-        case 'q':
-            // General query
-            if (args == "Attached") {
-                // qAttached: respond with "1" (attached to existing process)
-                out_request.type = DeviceRequest::HALT_REASON;  // Reuse to signal special response
-                return true;
-            }
-            CDBG_LOG_ON_CHANGE("gdb_unknown_query", "RSP: unknown query: q" << args);
-            return false;
-            
-        case 'v':
-            // Extended commands
-            if (args == "Kill") {
-                // vKill: terminate debugging session
-                CDBG_LOG_ON_CHANGE("gdb_kill", "RSP: GDB requested kill");
-                return true;
-            }
-            return false;
-            
-        case 'Q':
-            // General set - most are unsupported, just acknowledge
-            CDBG_LOG_ON_CHANGE("gdb_query_set", "RSP: query set (unsupported): Q" << args);
-            return true;
-            
-        default:
-            CDBG_LOG_ON_CHANGE("gdb_unknown_cmd", "RSP: unknown command: " << cmd << args);
-            return false;
-    }
-}
 
-std::string GDBCommandParser::format_response(const DeviceRequest& request, 
-                                             const std::string& device_response) {
-    // This is a placeholder - in a real implementation, you'd parse the device response
-    // based on the request type and format it appropriately for GDB
-    
-    // For now, return the raw response as hex-encoded data
-    // In practice, you'd decode Saturn debugger output and re-encode for GDB
-    return device_response;
-}
-
-// =============================================================================
-// GDBStub Implementation
-// =============================================================================
-
-GDBStub::GDBStub(uint16_t port) 
-    : port_(port), listen_socket_(-1) {
-}
-
-GDBStub::~GDBStub() {
-    if (listen_socket_ >= 0) {
-        close(listen_socket_);
-    }
-}
-
-bool GDBStub::send_packet(int fd, const std::string& data) {
-    std::string packet = RSPCodec::encode_packet(data);
-    
-    CDBG_LOG_ON_CHANGE("gdb_send", "RSP <- " << packet);
-    
-    ssize_t written = write(fd, packet.c_str(), packet.length());
-    if (written < 0) {
-        cdbg << "[GDB] write error: " << strerror(errno) << std::endl;
-        return false;
-    }
-    
-    // Wait for ACK ('+') or NAK ('-')
-    char ack;
-    struct pollfd pfd = {fd, POLLIN, 0};
-    int poll_result = poll(&pfd, 1, 1000);  // 1 second timeout
-    
-    if (poll_result <= 0) {
-        CDBG_LOG_ON_CHANGE("gdb_no_ack", "RSP: no ACK received (timeout)");
-        return false;
-    }
-    
-    ssize_t read_result = read(fd, &ack, 1);
-    if (read_result != 1) {
-        return false;
-    }
-    
-    if (ack == '+') {
-        return true;
-    } else if (ack == '-') {
-        CDBG_LOG_ON_CHANGE("gdb_nak", "RSP: received NAK, will retry");
-        return false;
-    }
-    
-    // Not an ACK/NAK, might be start of next packet
-    return true;
-}
-
-bool GDBStub::receive_packet(int fd, RSPPacket& out_packet) {
-    std::string raw_packet;
-    char byte;
-    
-    struct pollfd pfd = {fd, POLLIN, 0};
-    
-    // Wait for start of packet ('$')
-    while (true) {
-        int poll_result = poll(&pfd, 1, 1000);
-        if (poll_result <= 0) {
-            return false;  // Timeout
+        if (carry[pos] == '+' || carry[pos] == '-')
+        {
+            std::cout << prefix << carry[pos] << std::endl;
+            ++pos;
+            continue;
         }
-        
-        ssize_t n = read(fd, &byte, 1);
-        if (n != 1) {
-            return false;
-        }
-        
-        if (byte == '$') {
-            break;
-        }
-        // Discard other characters (ACKs, etc.)
+
+        ++pos;
     }
-    
-    // Read until '#'
-    while (true) {
-        ssize_t n = read(fd, &byte, 1);
-        if (n != 1) {
-            return false;
-        }
-        
-        if (byte == '#') {
-            break;
-        }
-        
-        raw_packet += byte;
+
+    if (pos > 0)
+    {
+        carry.erase(0, pos);
     }
-    
-    // Read checksum (2 hex digits)
-    char checksum_buf[3];
-    ssize_t n = read(fd, checksum_buf, 2);
-    if (n != 2) {
-        return false;
-    }
-    checksum_buf[2] = '\0';
-    
-    // Reconstruct full packet
-    std::string full_packet = "$" + raw_packet + "#" + std::string(checksum_buf);
-    
-    CDBG_LOG_ON_CHANGE("gdb_receive", "RSP -> " << full_packet);
-    
-    // Parse and validate
-    if (!RSPCodec::parse_packet(full_packet, out_packet)) {
-        // Send NAK
-        write(fd, "-", 1);
-        return false;
-    }
-    
-    // Send ACK
-    write(fd, "+", 1);
-    return true;
 }
 
-bool GDBStub::process_command(int fd, const RSPPacket& packet) {
-    DeviceRequest device_req;
-    
-    // Parse the command
-    if (!GDBCommandParser::parse_command(packet, device_req)) {
-        // Send error response
-        return send_packet(fd, "E01");
-    }
-    
-    // Special handling for some commands
-    if (packet.command == "qAttached") {
-        // qAttached: always respond "1" (attached)
-        return send_packet(fd, "1");
-    }
-    
-    if (packet.command[0] == 'v' && packet.command.substr(1) == "Kill") {
-        // vKill: OK, then close connection
-        send_packet(fd, "OK");
-        return false;  // Signal to close connection
-    }
-    
-    // For memory/register operations, we need to communicate with the device
-    // This is a placeholder that sends a generic response
-    
-    switch (device_req.type) {
-        case DeviceRequest::REG_READ:
-            // In a real implementation, read registers from Saturn debugger
-            // For now, return empty register state
-            CDBG_LOG_ON_CHANGE("gdb_reg_read", "RSP: register read (not implemented)");
-            return send_packet(fd, "");
-            
-        case DeviceRequest::MEM_READ:
-            CDBG_LOG_ON_CHANGE("gdb_mem_read", 
-                "RSP: memory read addr=0x" << std::hex << device_req.address 
-                << " len=0x" << device_req.length << std::dec);
-            // In a real implementation, read memory from Saturn
-            return send_packet(fd, "");
-            
-        case DeviceRequest::MEM_WRITE:
-            CDBG_LOG_ON_CHANGE("gdb_mem_write", 
-                "RSP: memory write addr=0x" << std::hex << device_req.address 
-                << " len=0x" << device_req.length << std::dec);
-            // In a real implementation, write memory to Saturn
-            return send_packet(fd, "OK");
-            
-        case DeviceRequest::CONTINUE:
-            CDBG_LOG_ON_CHANGE("gdb_continue", "RSP: continue execution");
-            // Send device command to continue
-            return send_packet(fd, "S05");  // Stopped by signal 5 (SIGTRAP)
-            
-        case DeviceRequest::STEP:
-            CDBG_LOG_ON_CHANGE("gdb_step", "RSP: single step");
-            // Send device command to step
-            return send_packet(fd, "S05");
-            
-        case DeviceRequest::HALT_REASON:
-            CDBG_LOG_ON_CHANGE("gdb_halt_reason", "RSP: query halt reason");
-            return send_packet(fd, "S05");  // Stopped by signal 5 (SIGTRAP)
-    }
-    
-    return send_packet(fd, "E02");
-}
+} // namespace
 
-void GDBStub::handle_client(int client_fd) {
-    cdbg << "[GDB] client connected" << std::endl;
-    
-    RSPPacket packet;
-    while (receive_packet(client_fd, packet)) {
-        if (!process_command(client_fd, packet)) {
-            break;  // Connection closed
-        }
-    }
-    
-    close(client_fd);
-    cdbg << "[GDB] client disconnected" << std::endl;
-}
+namespace ftdi {
 
-int GDBStub::run() {
-    // Create listening socket
-    listen_socket_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_socket_ < 0) {
-        cdbg << "[GDB] socket creation failed: " << strerror(errno) << std::endl;
+int DoTcpProxy(uint16_t port, bool verbose)
+{
+    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0)
+    {
+        std::cerr << "[TCPProxy] socket creation failed: " << strerror(errno) << std::endl;
         return 1;
     }
-    
-    // Allow reuse of port
-    int reuse = 1;
-    if (setsockopt(listen_socket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        cdbg << "[GDB] setsockopt failed: " << strerror(errno) << std::endl;
-        close(listen_socket_);
+
+    const int reuse = 1;
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+    {
+        std::cerr << "[TCPProxy] setsockopt failed: " << strerror(errno) << std::endl;
+        close(listen_fd);
         return 1;
     }
-    
-    // Bind to port
+
     struct sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port_);
-    
-    if (bind(listen_socket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        cdbg << "[GDB] bind failed: " << strerror(errno) << std::endl;
-        close(listen_socket_);
+    addr.sin_port = htons(port);
+
+    if (bind(listen_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
+    {
+        std::cerr << "[TCPProxy] bind failed: " << strerror(errno) << std::endl;
+        close(listen_fd);
         return 1;
     }
-    
-    // Listen
-    if (listen(listen_socket_, 1) < 0) {
-        cdbg << "[GDB] listen failed: " << strerror(errno) << std::endl;
-        close(listen_socket_);
+
+    if (listen(listen_fd, 1) < 0)
+    {
+        std::cerr << "[TCPProxy] listen failed: " << strerror(errno) << std::endl;
+        close(listen_fd);
         return 1;
     }
-    
-    cdbg << "[GDB] listening on port " << port_ << std::endl;
-    
-    // Accept connections
-    while (!ftdi::g_interrupt_flag) {
-        struct pollfd pfd = {listen_socket_, POLLIN, 0};
-        int poll_result = poll(&pfd, 1, 1000);  // 1 second timeout
-        
-        if (poll_result <= 0) {
+
+    std::cout << "[TCPProxy] listening on port " << port << std::endl;
+
+    unsigned char socket_rx[2048];
+    unsigned char ftdi_rx[2048];
+    std::string gdb_trace_buffer;
+    std::string target_trace_buffer;
+
+    while (!g_interrupt_flag)
+    {
+        struct pollfd accept_poll;
+        accept_poll.fd = listen_fd;
+        accept_poll.events = POLLIN;
+        accept_poll.revents = 0;
+
+        const int accept_status = poll(&accept_poll, 1, 250);
+        if (accept_status < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            std::cerr << "[TCPProxy] accept poll failed: " << strerror(errno) << std::endl;
+            break;
+        }
+        if (accept_status == 0)
+        {
             continue;
         }
-        
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        
-        int client_fd = accept(listen_socket_, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd < 0) {
-            cdbg << "[GDB] accept failed: " << strerror(errno) << std::endl;
+
+        int client_fd = accept(listen_fd, nullptr, nullptr);
+        if (client_fd < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            std::cerr << "[TCPProxy] accept failed: " << strerror(errno) << std::endl;
             continue;
         }
-        
-        handle_client(client_fd);
+
+        std::cout << "[TCPProxy] client connected" << std::endl;
+
+        bool client_alive = true;
+        while (client_alive && !g_interrupt_flag)
+        {
+            struct pollfd client_poll;
+            client_poll.fd = client_fd;
+            client_poll.events = POLLIN;
+            client_poll.revents = 0;
+
+            const int poll_status = poll(&client_poll, 1, 10);
+            if (poll_status < 0)
+            {
+                if (errno == EINTR)
+                {
+                    continue;
+                }
+                std::cerr << "[TCPProxy] client poll failed: " << strerror(errno) << std::endl;
+                client_alive = false;
+                break;
+            }
+
+            if (poll_status > 0)
+            {
+                if ((client_poll.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+                {
+                    client_alive = false;
+                }
+                else if ((client_poll.revents & POLLIN) != 0)
+                {
+                    const ssize_t recv_len = recv(client_fd, socket_rx, sizeof(socket_rx), 0);
+                    if (recv_len <= 0)
+                    {
+                        client_alive = false;
+                    }
+                    else
+                    {
+                        trace_rsp_stream("GDB>", gdb_trace_buffer, socket_rx, static_cast<size_t>(recv_len), verbose);
+                        if (!write_all_ftdi(&g_Device, socket_rx, static_cast<size_t>(recv_len)))
+                        {
+                            std::cerr << "[TCPProxy] FTDI write failed: " << ftdi_get_error_string(&g_Device) << std::endl;
+                            client_alive = false;
+                        }
+                    }
+                }
+            }
+
+            const int ftdi_len = ftdi_read_data(&g_Device, ftdi_rx, sizeof(ftdi_rx));
+            if (ftdi_len < 0)
+            {
+                std::cerr << "[TCPProxy] FTDI read failed: " << ftdi_get_error_string(&g_Device) << std::endl;
+                client_alive = false;
+                break;
+            }
+
+            if (ftdi_len > 0)
+            {
+                trace_rsp_stream("Target>", target_trace_buffer, ftdi_rx, static_cast<size_t>(ftdi_len), verbose);
+                if (!write_all_socket(client_fd, ftdi_rx, static_cast<size_t>(ftdi_len)))
+                {
+                    std::cerr << "[TCPProxy] socket write failed: " << strerror(errno) << std::endl;
+                    client_alive = false;
+                }
+            }
+        }
+
+        close(client_fd);
+        std::cout << "[TCPProxy] client disconnected" << std::endl;
     }
-    
-    close(listen_socket_);
-    cdbg << "[GDB] stub shutdown" << std::endl;
-    
+
+    close(listen_fd);
+    std::cout << "[TCPProxy] stopped" << std::endl;
     return 0;
 }
 
-}  // namespace gdb_stub
+} // namespace ftdi
