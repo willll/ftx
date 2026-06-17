@@ -1,12 +1,23 @@
 #include "ftdi.hpp"
 #include "log.hpp"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <sys/types.h>
+#define poll WSAPoll
+typedef unsigned int useconds_t;
+static inline int usleep(useconds_t us) { Sleep((us) / 1000 + ((us) % 1000 != 0 ? 1 : 0)); return 0; }
+static inline int socket_close(int s) { return closesocket(static_cast<SOCKET>(s)); }
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+static inline int socket_close(int s) { return close(s); }
+#endif
 
 #include <cerrno>
 #include <algorithm>
@@ -183,7 +194,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
     if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
     {
         std::cerr << "[TCPProxy] setsockopt failed: " << strerror(errno) << std::endl;
-        close(listen_fd);
+        socket_close(listen_fd);
         return 1;
     }
 
@@ -196,14 +207,14 @@ int DoTcpProxy(uint16_t port, bool verbose)
     if (bind(listen_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
     {
         std::cerr << "[TCPProxy] bind failed: " << strerror(errno) << std::endl;
-        close(listen_fd);
+        socket_close(listen_fd);
         return 1;
     }
 
     if (listen(listen_fd, 1) < 0)
     {
         std::cerr << "[TCPProxy] listen failed: " << strerror(errno) << std::endl;
-        close(listen_fd);
+        socket_close(listen_fd);
         return 1;
     }
 
@@ -331,12 +342,12 @@ int DoTcpProxy(uint16_t port, bool verbose)
             }
         }
 
-        close(client_fd);
+        socket_close(client_fd);
         std::cout << "[TCPProxy] client disconnected" << std::endl;
         cdbg << "[TCPProxy][dbg] client_fd closed" << std::endl;
     }
 
-    close(listen_fd);
+    socket_close(listen_fd);
     std::cout << "[TCPProxy] stopped" << std::endl;
     cdbg << "[TCPProxy][dbg] listen_fd closed" << std::endl;
     return 0;
