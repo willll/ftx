@@ -4,20 +4,20 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <sys/types.h>
 #define poll WSAPoll
 typedef unsigned int useconds_t;
-static inline int usleep(useconds_t us) { Sleep((us) / 1000 + ((us) % 1000 != 0 ? 1 : 0)); return 0; }
+static inline int usleep(useconds_t us) { Sleep((us + 999u) / 1000u); return 0; }
 static inline int socket_close(int s) { return closesocket(static_cast<SOCKET>(s)); }
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 static inline int socket_close(int s) { return close(s); }
 #endif
+
+#include <sys/types.h>
 
 #include <cerrno>
 #include <algorithm>

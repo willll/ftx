@@ -80,12 +80,14 @@ void DoConsole(bool acknowledge)
         // Use a timed wait on stdin so the thread can exit quickly when
         // g_interrupt_flag is set. The implementation is platform-specific:
         // POSIX uses poll()+read(), Windows uses WaitForSingleObject()+ReadFile().
+#ifdef _WIN32
+        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+#endif
         while (!g_interrupt_flag)
         {
             unsigned char input = 0;
 
 #ifdef _WIN32
-            HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
             DWORD waitResult = WaitForSingleObject(hStdin, 50);
             if (waitResult == WAIT_FAILED)
             {
