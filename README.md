@@ -29,23 +29,29 @@ This project provides a modern C++17 command-line utility for transferring data 
 
 ### Linux
 
+#### Debug (default)
+
+```sh
+mkdir -p build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make
+```
+
 #### Release
 
 ```sh
 mkdir -p build
 cd build
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 
-#### Debug
+#### Debug vs Release
 
-```sh
-mkdir -p build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Debug -G "Ninja" .. 
-cmake --build .
-```
+- Debug builds (`-DCMAKE_BUILD_TYPE=Debug`) keep debug traces enabled.
+- Release builds (`-DCMAKE_BUILD_TYPE=Release`) define `NDEBUG`, so debug traces from `cdbg` and `CDBG_LOG_ON_CHANGE` are compiled out.
+- You can also force `NDEBUG` explicitly with `-DNDEBUG=ON` (independent of build type).
 
 #### Static Build (Linux only)
 
@@ -175,6 +181,12 @@ The project includes extensive debug tracing. When built in Debug mode, traces a
 - `ftdi_read_data status=N` — device reads (0 = no data, >0 = bytes read, <0 = error)
 - `ftdi_write_data wrote=N` — successful write chunks to device
 
+TCP proxy mode also emits traces with `[TCPProxy][dbg]`, including:
+
+- client connect/disconnect and file descriptors
+- socket/FTDI byte counts per transfer
+- FTDI chunk write retries and flush/retry events
+
 To see these traces, build with `-DCMAKE_BUILD_TYPE=Debug`:
 
 ```sh
@@ -182,7 +194,14 @@ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
 ```
 
-In release builds (`-DCMAKE_BUILD_TYPE=Release` or unspecified), debug traces are compiled out entirely via the `NDEBUG` macro.
+To build with `NDEBUG` defined, configure with `-DNDEBUG=ON`:
+
+```sh
+cmake -DNDEBUG=ON ..
+make
+```
+
+In release builds (`-DCMAKE_BUILD_TYPE=Release`) or when configured with `-DNDEBUG=ON`, debug traces are compiled out via the `NDEBUG` macro.
 
 ### Error Handling
 

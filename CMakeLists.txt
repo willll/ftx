@@ -20,6 +20,12 @@ endif()
 
 option(BUILD_STATIC "Build a statically-linked executable (requires static libs)" OFF)
 
+# Allow users to request a build with NDEBUG defined via `cmake -DNDEBUG=ON ..`.
+option(FTX_DEFINE_NDEBUG "Define NDEBUG for ftx" OFF)
+if(DEFINED NDEBUG AND NDEBUG)
+  set(FTX_DEFINE_NDEBUG ON)
+endif()
+
 if(BUILD_STATIC AND UNIX AND NOT APPLE)
   message(STATUS "BUILD_STATIC=ON: attempting to produce a statically-linked executable")
   set(Boost_USE_STATIC_LIBS ON)
@@ -96,13 +102,9 @@ target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem libft
 # Use target-based language requirement (modern CMake)
 target_compile_features(ftx PRIVATE cxx_std_17)
 
-# If MAKE_BUILD_TYPE is set to DEBUG (either as a CMake variable or an
-# environment variable), define NDEBUG for the target. This deliberately follows
-# the user's request; note NDEBUG typically disables assert(), so this inverts
-# the usual convention.
-if((DEFINED MAKE_BUILD_TYPE AND "$<LOWER_CASE:${MAKE_BUILD_TYPE}>" STREQUAL "DEBUG") OR
-   ($<LOWER_CASE:"$ENV{MAKE_BUILD_TYPE}>" STREQUAL "DEBUG"))
-  message(STATUS "MAKE_BUILD_TYPE=DEBUG detected; adding NDEBUG definition to ftx")
+# Define NDEBUG when requested via the cache variable or when building Release.
+if(FTX_DEFINE_NDEBUG OR CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(STATUS "Defining NDEBUG for ftx")
   target_compile_definitions(ftx PRIVATE NDEBUG)
 endif()
 
