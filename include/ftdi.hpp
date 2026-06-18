@@ -1,3 +1,18 @@
+/**
+ * @file ftdi.hpp
+ * @brief Main FTDI USB device communication interface.
+ * @details Provides initialization, device listing, console, and TCP proxy modes.
+ * @author Anders Montonen (original), contributors
+ * @copyright 2012, 2013, 2015 Anders Montonen
+ * @license BSD 2-Clause
+ *
+ * This header defines the core FTDI communication API used throughout ftx:
+ * - Device initialization and cleanup
+ * - Interactive console mode
+ * - Debug console logging
+ * - Raw TCP<->FTDI proxy for debugger support
+ */
+
 /*
 
     Sega Saturn USB flash cart transfer utility

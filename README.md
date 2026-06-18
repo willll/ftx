@@ -238,6 +238,87 @@ In console mode, communication is bidirectional on supported terminals:
 - The stdin reader runs in a dedicated thread with a 50ms poll timeout, allowing clean exit on Ctrl+C.
 - Non-printable device output is displayed in hex notation (e.g., `[0xfe]`).
 
+## Code Documentation
+
+Comprehensive Doxygen documentation is available for developers and API users.
+
+### Generating Documentation
+
+**Prerequisites:** Doxygen must be installed:
+
+```sh
+# Ubuntu/Debian
+sudo apt install doxygen
+
+# macOS
+brew install doxygen
+
+# Windows
+# Download from https://www.doxygen.nl/download.html
+```
+
+### Building Documentation
+
+From the project root:
+
+```sh
+doxygen
+```
+
+This generates HTML documentation in `docs/html/`. Open `docs/html/index.html` in a browser.
+
+### Or via CMake (optional)
+
+To add a `docs` build target, add this to CMakeLists.txt:
+
+```cmake
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs 
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating Doxygen documentation"
+        VERBATIM
+    )
+endif()
+```
+
+Then build docs with:
+
+```sh
+cmake --build . --target docs
+```
+
+### Documentation Contents
+
+The generated documentation includes:
+
+- **Main Page** (`include/mainpage.doxygen`): Project overview, quick start, architecture
+- **API Reference**: Namespace and function documentation for all public modules
+  - `ftdi`: Core FTDI communication API
+  - `xfer`: Data transfer operations  
+  - `crc8`: CRC-8 checksum utilities
+- **Logging** (@ref Logging): Debug logging utilities documentation
+- **File Documentation**: Detailed comments for implementation files
+  - TCP proxy architecture and retry logic
+  - Packet tracing format
+  - Build mode behavior
+
+### Key Documented Functions
+
+Core public API:
+
+- **ftdi::InitComms()** — Device initialization
+- **ftdi::DoConsole()** — Interactive debug console
+- **ftdi::DoTcpProxy()** — TCP↔FTDI proxy server
+- **xfer::Download()**, **xfer::Upload()**, **xfer::Execute()** — Data transfer
+
+Internal helper functions (TCP proxy implementation):
+
+- `write_all_socket()` — TCP socket writes with EINTR handling
+- `write_all_ftdi()` — FTDI writes with adaptive chunking/retry
+- `trace_rsp_stream()` — RSP packet parsing and output
+
 ## License
 
 The software components are released under a BSD 2-Clause license. See the individual source files for details.

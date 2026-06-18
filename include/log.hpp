@@ -1,3 +1,11 @@
+/**
+ * @file log.hpp
+ * @brief Deduplicating debug logger with conditional compilation.
+ * @details Provides `cdbg` global logger and `CDBG_LOG_ON_CHANGE` macro.
+ *          In Release mode (NDEBUG defined), all debug output is compiled out.
+ *          In Debug mode, output goes to stdout with deduplication support.
+ */
+
 #pragma once
 
 #include <iostream>
@@ -5,6 +13,12 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+
+/**
+ * @defgroup Logging Debug Logging Utilities
+ * @brief Compile-time configurable debug logging.
+ * @{
+ */
 
 // Define a debug logger that outputs to std::cout when debugging is enabled
 #ifdef NDEBUG
@@ -20,10 +34,24 @@ public:
 // Global no-op logger instance
 static NullLogger cdbg;
 
+/**
+ * @def CDBG_LOG_ON_CHANGE(KEY, EXPR)
+ * @brief Log expression only if its value differs from the last logged value.
+ * @param KEY A unique identifier for the value (for deduplication).
+ * @param EXPR The expression to log (typically building a message with <<).
+ *
+ * In Release mode, this macro expands to nothing.
+ */
 #define CDBG_LOG_ON_CHANGE(KEY, EXPR) do { } while (0)
 
 #else
 // In debug mode (NDEBUG not defined), cdbg outputs to std::cout
+/**
+ * @def cdbg
+ * @brief Debug output stream (no-op in Release mode).
+ * @details Alias for std::cout in Debug mode, NullLogger in Release.
+ * Usage: `cdbg << "message" << std::endl;`
+ */
 #define cdbg std::cout
 
 inline bool cdbg_should_log_on_change(const std::string &key, const std::string &message)
@@ -42,6 +70,16 @@ inline bool cdbg_should_log_on_change(const std::string &key, const std::string 
     return true;
 }
 
+/**
+ * @def CDBG_LOG_ON_CHANGE(KEY, EXPR)
+ * @brief Log expression only if its value differs from the last logged value.
+ * @param KEY A unique identifier for the value (for deduplication).
+ * @param EXPR The expression to log (typically building a message with <<).
+ *
+ * Maintains a static map of message values keyed by KEY. Only logs if the
+ * current message differs from the previous one, reducing log spam from
+ * repeated identical events.
+ */
 #define CDBG_LOG_ON_CHANGE(KEY, EXPR)                                        \
     do                                                                        \
     {                                                                         \
@@ -54,3 +92,5 @@ inline bool cdbg_should_log_on_change(const std::string &key, const std::string 
         }                                                                     \
     } while (0)
 #endif
+
+/** @} */ // end of Logging group

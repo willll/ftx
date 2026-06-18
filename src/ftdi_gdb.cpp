@@ -1,3 +1,10 @@
+/**
+ * @file ftdi_gdb.cpp
+ * @brief Implementation of TCP↔FTDI proxy server for GDB/debugger integration.
+ * @details Provides transparent byte forwarding with optional RSP packet tracing,
+ *          adaptive USB write retry, and robust EINTR handling.
+ */
+
 #include "ftdi.hpp"
 #include "log.hpp"
 
@@ -26,6 +33,18 @@ static inline int socket_close(int s) { return close(s); }
 
 namespace {
 
+/**
+ * @brief Write all bytes to a TCP socket with EINTR handling.
+ *
+ * Continues sending until all bytes are written or an error occurs.
+ * Handles EINTR (interrupted system call) by retrying.
+ *
+ * @param[in] fd Socket file descriptor.
+ * @param[in] data Pointer to data buffer to send.
+ * @param[in] len Number of bytes to send.
+ * @return true if all bytes were sent, false on error.
+ * @note Generates debug traces prefixed with `[TCPProxy][dbg]`.
+ */
 bool write_all_socket(int fd, const unsigned char* data, size_t len)
 {
     cdbg << "[TCPProxy][dbg] socket write begin fd=" << fd << " bytes=" << len << std::endl;
@@ -58,6 +77,29 @@ bool write_all_socket(int fd, const unsigned char* data, size_t len)
     return true;
 }
 
+/**
+ * @brief Write data to FTDI device with adaptive chunking and retries.
+ *
+ * Implements robust USB write with the following features:
+ * - Sends in chunks (initial: 64 bytes, adaptive: 32, 16, 8, 1)
+ * - Up to 3 retry attempts per chunk with 1ms delay
+ * - Automatic chunk size reduction on transient failures
+ * - Recovery to larger chunks after successful writes
+ * - Returns actual bytes written for partial-failure detection
+ *
+ * The chunk size backoff strategy handles transient USB bulk write failures
+ * common in FTDI devices by reducing chunk size before retrying, then
+ * recovering to larger chunks for throughput.
+ *
+ * @param[in] dev FTDI device context.
+ * @param[in] data Pointer to data buffer.
+ * @param[in] len Number of bytes to send.
+ * @param[out] written_out If non-null, receives actual bytes written (even on failure).
+ * @return true if all bytes were sent, false if write failed.
+ * @note On partial failure, `written_out` contains bytes successfully written.
+ * @note Generates debug traces prefixed with `[TCPProxy][dbg]`.
+ * @note Calls ftdi_tcioflush() and usleep() on retries.
+ */
 bool write_all_ftdi(struct ftdi_context* dev, const unsigned char* data, size_t len, size_t* written_out)
 {
     constexpr size_t kInitialUsbChunkSize = 64;
@@ -131,6 +173,33 @@ bool write_all_ftdi(struct ftdi_context* dev, const unsigned char* data, size_t 
     return true;
 }
 
+/**
+ * @brief Trace RSP (Remote Serial Protocol) packets with a prefix.
+ *
+ * Buffers incoming bytes and emits complete RSP packets or ACK/NAK bytes.
+ * Uses a "carry" buffer to handle packets split across receive calls.
+ *
+ * **Packet Format**:
+ * - RSP packet: `$...(payload)...#XX` (checksum is two hex digits)
+ * - ACK: single `+` byte
+ * - NAK: single `-` byte
+ *
+ * **Trace Output**:
+ * When `verbose=true`, outputs to stdout:
+ * - `GDB>$qSupported:...#14` for client→device packets
+ * - `Target>$OK#9d` for device→client packets
+ *
+ * **Deduplication**: Partial packets remain in `carry` buffer until a complete
+ * packet is formed, avoiding spam when network boundaries split packets.
+ *
+ * @param[in] prefix String prefix (e.g., "GDB>" or "Target>") for output.
+ * @param[in,out] carry Stateful buffer for incomplete packets (modified in-place).
+ * @param[in] data Pointer to incoming data chunk.
+ * @param[in] len Number of bytes in chunk.
+ * @param[in] verbose If false, function does nothing (no-op).
+ * @note Output goes to stdout. Carry buffer is erased as complete packets are emitted.
+ * @note This function is suitable for interrupt-driven I/O loops.
+ */
 void trace_rsp_stream(const char* prefix, std::string& carry, const unsigned char* data, size_t len, bool verbose)
 {
     if (!verbose)
@@ -180,6 +249,46 @@ void trace_rsp_stream(const char* prefix, std::string& carry, const unsigned cha
 
 namespace ftdi {
 
+/**
+ * @brief Start a raw TCP↔FTDI proxy server.
+ *
+ * Establishes a TCP listening socket on localhost and forwards all bytes
+ * between connected clients and the FTDI device in both directions.
+ * Acts as a transparent byte bridge with no protocol-specific interpretation.
+ *
+ * **Server Behavior**:
+ * - Listens on `127.0.0.1:port` (loopback only for security)
+ * - Accepts one client at a time
+ * - Forwards TCP→FTDI and FTDI→TCP bidirectionally
+ * - Automatic reconnect loop (waits for next client after disconnect)
+ * - Stops on `g_interrupt_flag` or fatal socket error
+ *
+ * **Polling Timeouts**:
+ * - Accept poll: 250ms (allows checking g_interrupt_flag frequently)
+ * - Client poll: 10ms (low latency for bidirectional forwarding)
+ *
+ * **Error Handling**:
+ * - EINTR (interrupted system calls): Automatically retried
+ * - Socket errors: Logged to stderr, client disconnected
+ * - FTDI write failures: Handled by `write_all_ftdi()` with retry logic
+ *
+ * **Tracing** (with `verbose=true`):
+ * - RSP command packets prefixed with `GDB>` or `Target>`
+ * - Byte counts for each successful forward operation
+ * - Connection lifecycle events
+ *
+ * @param[in] port TCP port to listen on (default: 1234).
+ * @param[in] verbose If true, prints traced RSP packets to stdout.
+ * @return Exit status (0 on clean shutdown, 1 on error).
+ *
+ * @note This function blocks until `g_interrupt_flag` is set (typically via signal).
+ * @note Requires FTDI device to be initialized via `InitComms()` before calling.
+ * @note All debug output goes to stdout/stderr; no return value indicates byte counts.
+ *
+ * @see write_all_socket() for TCP write details.
+ * @see write_all_ftdi() for adaptive FTDI write strategy.
+ * @see trace_rsp_stream() for packet tracing format.
+ */
 int DoTcpProxy(uint16_t port, bool verbose)
 {
     cdbg << "[TCPProxy][dbg] start port=" << port << " verbose=" << verbose << std::endl;

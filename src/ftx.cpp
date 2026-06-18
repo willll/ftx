@@ -1,3 +1,17 @@
+/**
+ * @file ftx.cpp
+ * @brief Main entry point and CLI argument parsing.
+ * @details Implements command-line interface for ftx utility with support for:
+ *          - Device enumeration and selection (VID/PID/Serial)
+ *          - Debug console mode
+ *          - TCP proxy for debugger integration
+ *          - Data transfer operations (upload, download, execute)
+ *
+ * @author Anders Montonen (original)
+ * @copyright 2012, 2013, 2015 Anders Montonen
+ * @license BSD 2-Clause
+ */
+
 /*
 
     Sega Saturn USB flash cart transfer utility

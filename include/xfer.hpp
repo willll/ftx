@@ -1,3 +1,12 @@
+/**
+ * @file xfer.hpp
+ * @brief Data transfer operations (upload, download, execute).
+ * @details Defines protocols and constants for communicating with Saturn cartridges.
+ * @author Anders Montonen (original)
+ * @copyright 2012, 2013, 2015 Anders Montonen
+ * @license BSD 2-Clause
+ */
+
 /*
 
     Sega Saturn USB flash cart transfer utility
@@ -32,14 +41,20 @@
 #include <string>
 #include <cstdint>
 
+/**
+ * @namespace xfer
+ * @brief Data transfer operations for Saturn cartridges.
+ */
 namespace xfer {
 
 /**
  * @brief USB read packet size in bytes.
+ * @details Specifies the maximum chunk size for reading from the device.
  */
-constexpr std::size_t USB_READPACKET_SIZE = 64 * 1024;
+const std::size_t USB_READPACKET_SIZE = 64 * 1024;
 /**
  * @brief USB write packet size in bytes.
+ * @details Specifies the maximum chunk size for writing to the device.
  */
 constexpr std::size_t USB_WRITEPACKET_SIZE = 4 * 1024;
 /**

@@ -1,0 +1,69 @@
+# Doxyfile 1.9+
+# Configuration for ftx project documentation generation
+
+PROJECT_NAME           = "ftx - Saturn USB Cart Transfer Utility"
+PROJECT_NUMBER         = "1.0"
+PROJECT_BRIEF          = "Modern C++17 utility for Sega Saturn USB flash cart data transfer"
+
+INPUT                  = include/ src/
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.hpp *.h *.cpp *.doxygen
+RECURSIVE              = YES
+
+EXCLUDE_PATTERNS       = */satcom_lib/* */build/*
+
+OUTPUT_DIRECTORY       = ./docs
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_LOCAL_METHODS  = YES
+
+GENERATE_TREEVIEW      = YES
+TREEVIEW_WIDTH         = 250
+FULL_SIDEBAR           = NO
+
+SORT_MEMBER_DOCS       = YES
+SORT_BY_SCOPE_NAME     = NO
+
+ALIASES                = "author=@par Author:" \
+                         "license=@par License:"
+
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_LACKED     = YES
+
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MARKDOWN_SUPPORT       = YES
+
+CREATE_SUBDIRS         = NO
+INLINE_SOURCES         = NO
+INLINE_INFO            = YES
+SHOW_INCLUDE_FILES     = YES
+SHOW_GROUPED_MEMB_INC  = NO
+COMPACT_LATEX          = YES
+LATEX_HEADER           =
+USE_PDFLATEX           = YES
+
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_FRIEND_COMPOUNDS  = NO
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           =
+INCLUDE_FILE_PATTERNS  =
+
+PREDEFINED             = NDEBUG \
+                         FTX_DEBUG_BUILD
+
+MAX_INITIALIZERS       = 30
+
+MIAMEL_SEARCH          = NO

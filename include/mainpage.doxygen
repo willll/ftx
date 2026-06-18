@@ -1,0 +1,146 @@
+/**
+ * @mainpage ftx - Sega Saturn USB Cart Transfer Utility
+ *
+ * @section overview Overview
+ *
+ * ftx is a modern C++17 command-line utility for transferring data to and from
+ * a Sega Saturn USB flash cartridge. It provides:
+ *
+ * - **Data Transfer**: Download, upload, and execute binaries on the device
+ * - **Debug Console**: Interactive console mode for device communication
+ * - **TCP Proxy**: Raw TCP↔FTDI bridge for debugger integration
+ * - **Robust Error Handling**: Automatic recovery, retry logic, and comprehensive traces
+ *
+ * @section features Key Features
+ *
+ * - C++17 modern codebase with comprehensive error handling
+ * - Cross-platform support (Linux, Windows, macOS via CMake)
+ * - Adaptive USB write retry with chunk size backoff
+ * - Deduplicating debug logger with compile-time control
+ * - Extensive Doxygen documentation
+ * - Static analysis support (cppcheck)
+ *
+ * @section quickstart Quick Start
+ *
+ * ### Building
+ *
+ * **Debug build** (with full traces):
+ * @code
+ * cmake -DCMAKE_BUILD_TYPE=Debug ..
+ * cmake --build .
+ * @endcode
+ *
+ * **Release build** (traces compiled out):
+ * @code
+ * cmake -DCMAKE_BUILD_TYPE=Release ..
+ * cmake --build .
+ * @endcode
+ *
+ * ### Usage
+ *
+ * **Debug console mode**:
+ * @code
+ * ./ftx -c
+ * @endcode
+ *
+ * **TCP proxy for GDB** (with packet tracing):
+ * @code
+ * ./ftx -g 1234 -verbose
+ * @endcode
+ *
+ * **Data transfer**:
+ * @code
+ * ./ftx -d output.bin 0x200000 0x10000  # Download 64KB from address 0x200000
+ * ./ftx -u input.bin 0x200000           # Upload input.bin to address 0x200000
+ * ./ftx -x prog.bin 0x200000            # Upload and execute
+ * @endcode
+ *
+ * @section architecture Architecture
+ *
+ * ### Core Modules
+ *
+ * - **ftdi** (@ref ftdi.hpp): Main FTDI device communication interface
+ *   - Device initialization and lifecycle management
+ *   - Console mode for interactive debugging
+ *   - TCP proxy for remote debugger support
+ *
+ * - **xfer** (@ref xfer.hpp): Data transfer operations
+ *   - Protocol definitions for Saturn cartridge communication
+ *   - Download, upload, and execute operations
+ *
+ * - **log** (@ref log.hpp): Debug logging with compile-time control
+ *   - `cdbg` stream for debug output (no-op in Release)
+ *   - `CDBG_LOG_ON_CHANGE()` macro for deduplication
+ *   - Conditional compilation via `NDEBUG`
+ *
+ * - **crc8** (@ref crc.hpp): CRC-8 checksum computation
+ *   - Lookup-table based for efficiency
+ *   - Used in Saturn cartridge protocols
+ *
+ * ### Build Modes
+ *
+ * - **Debug** (`-DCMAKE_BUILD_TYPE=Debug`): Full traces, no optimization
+ * - **Release** (`-DCMAKE_BUILD_TYPE=Release`): Traces compiled out via `NDEBUG`
+ * - **NDEBUG** (`-DNDEBUG=ON`): Force trace compilation regardless of build type
+ *
+ * @section tcp_proxy TCP Proxy Mode
+ *
+ * The TCP proxy (`-g [port]`) forwards all bytes between TCP and FTDI:
+ *
+ * - **Without `-verbose`**: Silent byte forwarding (production use)
+ * - **With `-verbose`**: Prints RSP packets prefixed with `GDB>` or `Target>`
+ * - **Retry logic**: Adaptive chunk size backoff (64→32→16→1 bytes) with retry delays
+ * - **Note**: Target firmware must implement RSP protocol; proxy does no synthesis
+ *
+ * @section debugging Debug Features
+ *
+ * ### Deduplicating Logger
+ *
+ * The @ref Logging "debug logging system" provides:
+ *
+ * - `cdbg << ...` for simple output (compiled out in Release)
+ * - `CDBG_LOG_ON_CHANGE(KEY, message)` for spam reduction
+ * - Automatic thread-safe deduplication
+ *
+ * ### Trace Categories
+ *
+ * - `[InitComms][dbg]`: Device initialization
+ * - `[DoConsole][dbg]`: Console I/O and threading
+ * - `[TCPProxy][dbg]`: TCP proxy lifecycle, I/O counts, retry attempts\n *
+ * @section examples Examples
+ *
+ * ### Console Debug Session
+ *
+ * @code
+ * ./ftx -c
+ * [DoConsole] Entering debug console mode. Press Ctrl+C to exit.
+ * # Type commands here, device output appears below
+ * @endcode
+ *
+ * ### GDB Integration via TCP Proxy
+ *
+ * Terminal 1 (start proxy with tracing):
+ * @code
+ * ./ftx -g 1234 -verbose
+ * [TCPProxy] listening on port 1234\n * @endcode
+ *
+ * Terminal 2 (connect GDB):
+ * @code
+ * gdb-multiarch
+ * (gdb) target remote localhost:1234\n * (gdb) # GDB RSP packets are now traced in terminal 1
+ * @endcode
+ *
+ * @section contributing Contributing
+ *
+ * This project maintains high code quality standards:
+ *
+ * - C++17 modern idioms with move semantics
+ * - Comprehensive Doxygen documentation
+ * - Static analysis via cppcheck
+ * - Cross-platform CMake build system
+ *
+ * @section license License
+ *
+ * BSD 2-Clause License. See individual source files for attribution.\n * Original work by Anders Montonen (andersm/usbcart).\n *
+ * @section see_also See Also\n *
+ * - @ref ftdi.hpp - Main FTDI interface\n * - @ref xfer.hpp - Data transfer operations\n * - @ref log.hpp - Debug logging system\n */
