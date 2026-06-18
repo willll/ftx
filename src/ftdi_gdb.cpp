@@ -1,12 +1,23 @@
 #include "ftdi.hpp"
 #include "log.hpp"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define poll WSAPoll
+typedef unsigned int useconds_t;
+static inline int usleep(useconds_t us) { Sleep((us + 999u) / 1000u); return 0; }
+static inline int socket_close(int s) { return closesocket(static_cast<SOCKET>(s)); }
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
+static inline int socket_close(int s) { return close(s); }
+#endif
+
+#include <sys/types.h>
 
 #include <cerrno>
 #include <algorithm>
@@ -21,7 +32,7 @@ bool write_all_socket(int fd, const unsigned char* data, size_t len)
     size_t sent = 0;
     while (sent < len)
     {
-        const ssize_t n = send(fd, data + sent, len - sent, 0);
+        const ssize_t n = send(fd, reinterpret_cast<const char*>(data + sent), len - sent, 0);
         if (n < 0)
         {
             if (errno == EINTR)
@@ -180,10 +191,10 @@ int DoTcpProxy(uint16_t port, bool verbose)
     }
 
     const int reuse = 1;
-    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse)) < 0)
     {
         std::cerr << "[TCPProxy] setsockopt failed: " << strerror(errno) << std::endl;
-        close(listen_fd);
+        socket_close(listen_fd);
         return 1;
     }
 
@@ -196,14 +207,14 @@ int DoTcpProxy(uint16_t port, bool verbose)
     if (bind(listen_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
     {
         std::cerr << "[TCPProxy] bind failed: " << strerror(errno) << std::endl;
-        close(listen_fd);
+        socket_close(listen_fd);
         return 1;
     }
 
     if (listen(listen_fd, 1) < 0)
     {
         std::cerr << "[TCPProxy] listen failed: " << strerror(errno) << std::endl;
-        close(listen_fd);
+        socket_close(listen_fd);
         return 1;
     }
 
@@ -284,7 +295,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
                 }
                 else if ((client_poll.revents & POLLIN) != 0)
                 {
-                    const ssize_t recv_len = recv(client_fd, socket_rx, sizeof(socket_rx), 0);
+                    const ssize_t recv_len = recv(client_fd, reinterpret_cast<char*>(socket_rx), sizeof(socket_rx), 0);
                     if (recv_len <= 0)
                     {
                         cdbg << "[TCPProxy][dbg] client recv returned " << recv_len << std::endl;
@@ -331,12 +342,12 @@ int DoTcpProxy(uint16_t port, bool verbose)
             }
         }
 
-        close(client_fd);
+        socket_close(client_fd);
         std::cout << "[TCPProxy] client disconnected" << std::endl;
         cdbg << "[TCPProxy][dbg] client_fd closed" << std::endl;
     }
 
-    close(listen_fd);
+    socket_close(listen_fd);
     std::cout << "[TCPProxy] stopped" << std::endl;
     cdbg << "[TCPProxy][dbg] listen_fd closed" << std::endl;
     return 0;

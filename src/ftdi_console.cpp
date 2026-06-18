@@ -34,10 +34,15 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <poll.h>
 #include <thread>
-#include <unistd.h>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 #include "log.hpp"
 #include "ftdi.hpp"
@@ -72,10 +77,45 @@ void DoConsole(bool acknowledge)
         std::string pendingLine;
         cdbg << "[DoConsole][dbg] stdin reader thread started" << std::endl;
 
-        // Use poll()+read() with a short timeout so the thread can exit quickly
-        // when g_interrupt_flag is set.
+        // Use a timed wait on stdin so the thread can exit quickly when
+        // g_interrupt_flag is set. The implementation is platform-specific:
+        // POSIX uses poll()+read(), Windows uses WaitForSingleObject()+ReadFile().
+#ifdef _WIN32
+        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+#endif
         while (!g_interrupt_flag)
         {
+            unsigned char input = 0;
+
+#ifdef _WIN32
+            DWORD waitResult = WaitForSingleObject(hStdin, 50);
+            if (waitResult == WAIT_FAILED)
+            {
+                cdbg << "[DoConsole][dbg] stdin poll failed, stopping reader thread" << std::endl;
+                g_interrupt_flag = true;
+                break;
+            }
+
+            if (waitResult == WAIT_TIMEOUT)
+            {
+                continue;
+            }
+
+            DWORD bytesRead = 0;
+            if (!ReadFile(hStdin, &input, 1, &bytesRead, NULL))
+            {
+                cdbg << "[DoConsole][dbg] stdin read failed, stopping reader thread" << std::endl;
+                g_interrupt_flag = true;
+                break;
+            }
+
+            if (bytesRead == 0)
+            {
+                cdbg << "[DoConsole][dbg] stdin EOF, stopping reader thread" << std::endl;
+                g_interrupt_flag = true;
+                break;
+            }
+#else
             struct pollfd stdinPollFd;
             stdinPollFd.fd = STDIN_FILENO;
             stdinPollFd.events = POLLIN;
@@ -106,7 +146,6 @@ void DoConsole(bool acknowledge)
                 continue;
             }
 
-            unsigned char input = 0;
             const ssize_t readStatus = read(STDIN_FILENO, &input, 1);
             if (readStatus == 0)
             {
@@ -121,6 +160,7 @@ void DoConsole(bool acknowledge)
                 g_interrupt_flag = true;
                 break;
             }
+#endif
 
             cdbg << "[DoConsole][dbg] stdin got byte=0x" << std::hex << std::setw(2)
                  << std::setfill('0') << static_cast<int>(input) << std::dec << std::endl;

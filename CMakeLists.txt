@@ -88,6 +88,8 @@ if (WIN32)
     # CXX_COMPILER_FLAGS property.
     target_compile_options(ftx PRIVATE /std:c++17)
   endif()
+  # Link against Winsock2 for socket and WSAPoll support
+  target_link_libraries(ftx PRIVATE ws2_32)
 endif()
 
 target_include_directories(ftx
