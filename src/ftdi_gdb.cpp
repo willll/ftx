@@ -32,7 +32,7 @@ bool write_all_socket(int fd, const unsigned char* data, size_t len)
     size_t sent = 0;
     while (sent < len)
     {
-        const ssize_t n = send(fd, data + sent, len - sent, 0);
+        const ssize_t n = send(fd, reinterpret_cast<const char*>(data + sent), len - sent, 0);
         if (n < 0)
         {
             if (errno == EINTR)
@@ -191,7 +191,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
     }
 
     const int reuse = 1;
-    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse)) < 0)
     {
         std::cerr << "[TCPProxy] setsockopt failed: " << strerror(errno) << std::endl;
         socket_close(listen_fd);
@@ -295,7 +295,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
                 }
                 else if ((client_poll.revents & POLLIN) != 0)
                 {
-                    const ssize_t recv_len = recv(client_fd, socket_rx, sizeof(socket_rx), 0);
+                    const ssize_t recv_len = recv(client_fd, reinterpret_cast<char*>(socket_rx), sizeof(socket_rx), 0);
                     if (recv_len <= 0)
                     {
                         cdbg << "[TCPProxy][dbg] client recv returned " << recv_len << std::endl;
