@@ -122,6 +122,7 @@ void PrintUsage(const char* progName) {
     std::cout << "  -dump  <file>                 Dump BIOS to file\n\n";
     std::cout << "  --ls <path>                   List files and directories\n";
     std::cout << "  --rm <path>                   Remove a file or empty directory\n";
+    std::cout << "  --cp <file> <sdraw:start:count> Copy a file to a raw SD range\n";
     std::cout << "  --crc <file>                  Print CRC-8 for a file\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
@@ -145,8 +146,9 @@ struct CommandLineArgs {
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
     bool verbose = false; ///< Verbose proxy tracing
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
+    std::string target; ///< Target path for copy operations
     unsigned int address = 0; ///< Address for transfer/execute
     unsigned int length = 0; ///< Length for download
 };
@@ -175,6 +177,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("r,r", po::value<std::string>(), "Run: <address>")
         ("ls", po::value<std::string>(), "List files and directories: <path>")
         ("rm", po::value<std::string>(), "Remove a file or empty directory: <path>")
+        ("cp", po::value<std::vector<std::string>>()->multitoken(), "Copy: <file> <sdraw:start:count>")
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
         ("help,h", "Help: Show this help message")
         ("dump,D", po::value<std::string>(), "Dump BIOS: <file>");
@@ -196,6 +199,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
                 token = "--ls";
             } else if (token == "-rm") {
                 token = "--rm";
+            } else if (token == "-cp") {
+                token = "--cp";
             } else if (token == "-crc") {
                 token = "--crc";
             }
@@ -234,6 +239,13 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     } else if (vm.count("rm")) {
         args.command = CommandLineArgs::RM;
         args.filename = vm["rm"].as<std::string>();
+    } else if (vm.count("cp")) {
+        auto vals = vm["cp"].as<std::vector<std::string>>();
+        if (vals.size() == 2) {
+            args.command = CommandLineArgs::CP;
+            args.filename = vals[0];
+            args.target = vals[1];
+        }
     } else if (vm.count("crc")) {
         args.command = CommandLineArgs::CRC;
         args.filename = vm["crc"].as<std::string>();
@@ -345,6 +357,9 @@ int main(int argc, char *argv[])
                 break;
             case CommandLineArgs::RM:
                 xfer::DoRemove(args.filename.c_str());
+                break;
+            case CommandLineArgs::CP:
+                xfer::DoSdUpload(args.filename.c_str(), args.target.c_str());
                 break;
             case CommandLineArgs::CRC:
                 xfer::DoCrc(args.filename.c_str());

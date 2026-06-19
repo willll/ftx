@@ -53,6 +53,7 @@ namespace xfer
   namespace
   {
     constexpr uint8_t REMOTE_IO_MAGIC[4] = {'S', 'R', 'L', '1'};
+    constexpr uint32_t SDC_BLOCK_SIZE = 512;
 
     enum class RemoteIoCommand : uint8_t
     {
@@ -74,6 +75,84 @@ namespace xfer
       RemoteIoStatus status = RemoteIoStatus::ERROR;
       std::string payload;
     };
+
+    struct SdUploadTarget
+    {
+      uint32_t start_sector = 0;
+      uint32_t sector_count = 0;
+      bool has_range = false;
+    };
+
+    bool ParseSdUploadTarget(const char *saturn_sd_path, SdUploadTarget &target)
+    {
+      if (saturn_sd_path == nullptr)
+      {
+        std::cerr << "[DoSdUpload] Missing SD target path." << std::endl;
+        return false;
+      }
+
+      const std::string path(saturn_sd_path);
+      const std::string prefix = "sdraw:";
+      if (path.rfind(prefix, 0) == 0)
+      {
+        const std::string remainder = path.substr(prefix.size());
+        const std::size_t firstColon = remainder.find(':');
+        if (firstColon == std::string::npos || remainder.find(':', firstColon + 1) != std::string::npos)
+        {
+          std::cerr << "[DoSdUpload] Invalid SD range: '" << saturn_sd_path
+                    << "'. Expected sdraw:<start>:<count>." << std::endl;
+          return false;
+        }
+
+        const std::string startText = remainder.substr(0, firstColon);
+        const std::string countText = remainder.substr(firstColon + 1);
+        if (startText.empty() || countText.empty())
+        {
+          std::cerr << "[DoSdUpload] Invalid SD range: '" << saturn_sd_path
+                    << "'. Expected sdraw:<start>:<count>." << std::endl;
+          return false;
+        }
+
+        char *end = nullptr;
+        const unsigned long parsedStart = std::strtoul(startText.c_str(), &end, 0);
+        if (*end != '\0' || parsedStart > 0xFFFFFFFFUL)
+        {
+          std::cerr << "[DoSdUpload] Invalid SD start sector: '" << startText
+                    << "'." << std::endl;
+          return false;
+        }
+
+        end = nullptr;
+        const unsigned long parsedCount = std::strtoul(countText.c_str(), &end, 0);
+        if (*end != '\0' || parsedCount == 0 || parsedCount > 0xFFFFFFFFUL)
+        {
+          std::cerr << "[DoSdUpload] Invalid SD sector count: '" << countText
+                    << "'." << std::endl;
+          return false;
+        }
+
+        target.start_sector = static_cast<uint32_t>(parsedStart);
+        target.sector_count = static_cast<uint32_t>(parsedCount);
+        target.has_range = true;
+        return true;
+      }
+
+      char *end = nullptr;
+      const unsigned long parsed = std::strtoul(saturn_sd_path, &end, 0);
+      if (saturn_sd_path == end || (end != nullptr && *end != '\0') ||
+          parsed > 0xFFFFFFFFUL)
+      {
+        std::cerr << "[DoSdUpload] Invalid SD target: '" << saturn_sd_path
+                  << "'. Expected sdraw:<start>:<count> or a numeric sector index."
+                  << std::endl;
+        return false;
+      }
+
+      target.start_sector = static_cast<uint32_t>(parsed);
+      target.sector_count = 0;
+      target.has_range = false;
+      return true;
+    }
 
     bool WriteAllToDevice(const uint8_t *data, std::size_t size)
     {
@@ -736,17 +815,11 @@ namespace xfer
       return true;
     };
 
-    char *end = nullptr;
-    const unsigned long parsed = std::strtoul(saturn_sd_path, &end, 0);
-    if (saturn_sd_path == end || (end != nullptr && *end != '\0') ||
-        parsed > 0xFFFFFFFFUL)
+    SdUploadTarget target;
+    if (!ParseSdUploadTarget(saturn_sd_path, target))
     {
-      std::cerr << "[DoSdUpload] Invalid SD sector: '" << saturn_sd_path
-                << "'. Expected a numeric sector index." << std::endl;
       return 0;
     }
-
-    const uint32_t start_sector = static_cast<uint32_t>(parsed);
 
     const char *filename_for_display = host_filename;
     for (const char *p = host_filename; *p != '\0'; ++p)
@@ -781,6 +854,20 @@ namespace xfer
 
     const uint32_t file_size = static_cast<uint32_t>(file_size_long);
 
+    if (target.has_range)
+    {
+      const uint64_t max_bytes = static_cast<uint64_t>(target.sector_count) *
+                                 static_cast<uint64_t>(SDC_BLOCK_SIZE);
+      if (static_cast<uint64_t>(file_size) > max_bytes)
+      {
+        std::cerr << "[DoSdUpload] File is too large for target range '"
+                  << saturn_sd_path << "' (" << file_size << " bytes > "
+                  << max_bytes << " bytes)." << std::endl;
+        fclose(file);
+        return 0;
+      }
+    }
+
     // 1. Send Command (0x10)
     unsigned char cmd = 0x10;
     if (!write_all(&cmd, 1, "Command"))
@@ -812,10 +899,10 @@ namespace xfer
 
     // 4. Send SD start sector (Big Endian)
     const unsigned char sector_buf[4] = {
-        static_cast<unsigned char>(start_sector >> 24),
-        static_cast<unsigned char>(start_sector >> 16),
-        static_cast<unsigned char>(start_sector >> 8),
-        static_cast<unsigned char>(start_sector)};
+      static_cast<unsigned char>(target.start_sector >> 24),
+      static_cast<unsigned char>(target.start_sector >> 16),
+      static_cast<unsigned char>(target.start_sector >> 8),
+      static_cast<unsigned char>(target.start_sector)};
     if (!write_all(sector_buf, 4, "Start sector"))
     {
       fclose(file);

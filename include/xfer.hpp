@@ -116,6 +116,14 @@ int DoDownload(const char* filename, uint32_t address, std::size_t size);
 int DoUpload(const char* filename, uint32_t address, const bool execute = false);
 
 /**
+ * @brief Copy a local file to a raw SD card range.
+ * @param host_filename Input file name.
+ * @param saturn_sd_path Raw SD target path, typically sdraw:<start>:<count>.
+ * @return 1 on success, 0 on error.
+ */
+int DoSdUpload(const char *host_filename, const char *saturn_sd_path);
+
+/**
  * @brief Send execute command to device at given address.
  * @param address Address to execute.
  * @return 1 on success, 0 on error.
