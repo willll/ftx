@@ -78,6 +78,27 @@ constexpr std::size_t WRITE_PAYLOAD_SIZE = USB_WRITEPACKET_SIZE;
 int DoBiosDump(const char *filename);
 
 /**
+ * @brief List files and directories in a path.
+ * @param path Directory path to list.
+ * @return 1 on success, 0 on error.
+ */
+int DoList(const char *path);
+
+/**
+ * @brief Remove a file or an empty directory.
+ * @param path File or directory path to remove.
+ * @return 1 on success, 0 on error.
+ */
+int DoRemove(const char *path);
+
+/**
+ * @brief Compute and print the CRC-8 of a file.
+ * @param filename Input file name.
+ * @return 1 on success, 0 on error.
+ */
+int DoCrc(const char *filename);
+
+/**
  * @brief Download data from device and write to file.
  * @param filename Output file name.
  * @param address Device address to read from.

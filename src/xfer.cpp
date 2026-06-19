@@ -30,12 +30,15 @@
 #include <ftdi.h>
 
 #include <chrono>
+#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <vector>
+#include <algorithm>
 
 #include "crc.hpp"
 #include "ftdi.hpp"
@@ -47,6 +50,11 @@
 
 namespace xfer
 {
+
+  namespace
+  {
+    using DirectoryEntry = std::filesystem::directory_entry;
+  }
 
   unsigned char SendBuf[2 * WRITE_PAYLOAD_SIZE];
   unsigned char RecvBuf[2 * READ_PAYLOAD_SIZE];
@@ -122,6 +130,123 @@ namespace xfer
               << std::endl;
     // Step 2: Call DoDownload to perform the dump from the BIOS address and size
     return DoDownload(filename, saturn::bios_address, saturn::bios_size);
+  }
+
+  int DoList(const char *path)
+  {
+    std::error_code ec;
+    std::filesystem::path inputPath(path);
+
+    if (!std::filesystem::exists(inputPath, ec))
+    {
+      std::cerr << "[DoList] Path does not exist: " << path << std::endl;
+      return 0;
+    }
+
+    if (std::filesystem::is_regular_file(inputPath, ec))
+    {
+      std::cout << "[DoList] " << inputPath.filename().string() << " [F]"
+                << std::endl;
+      return 1;
+    }
+
+    if (!std::filesystem::is_directory(inputPath, ec))
+    {
+      std::cerr << "[DoList] Path is neither a file nor a directory: " << path
+                << std::endl;
+      return 0;
+    }
+
+    std::vector<DirectoryEntry> entries;
+    for (const auto &entry : std::filesystem::directory_iterator(inputPath, ec))
+    {
+      if (ec)
+      {
+        std::cerr << "[DoList] Directory iteration error: "
+                  << ec.message() << std::endl;
+        return 0;
+      }
+      entries.push_back(entry);
+    }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const DirectoryEntry &lhs, const DirectoryEntry &rhs) {
+                return lhs.path().filename().string() < rhs.path().filename().string();
+              });
+
+    std::cout << "[DoList] Listing: " << inputPath.string() << std::endl;
+    for (const auto &entry : entries)
+    {
+      std::error_code statusEc;
+      const bool isDir = entry.is_directory(statusEc);
+      const bool isFile = entry.is_regular_file(statusEc);
+      std::cout << "  " << (isDir ? "[D]" : isFile ? "[F]" : "[?]") << " "
+                << entry.path().filename().string() << std::endl;
+    }
+
+    return 1;
+  }
+
+  int DoRemove(const char *path)
+  {
+    std::error_code ec;
+    const std::filesystem::path target(path);
+
+    if (!std::filesystem::exists(target, ec))
+    {
+      std::cerr << "[DoRemove] Path does not exist: " << path << std::endl;
+      return 0;
+    }
+
+    if (!std::filesystem::remove(target, ec))
+    {
+      if (ec)
+      {
+        std::cerr << "[DoRemove] Remove failed: " << ec.message() << std::endl;
+      }
+      else
+      {
+        std::cerr << "[DoRemove] Path not removed (directory may not be empty): "
+                  << path << std::endl;
+      }
+      return 0;
+    }
+
+    std::cout << "[DoRemove] Removed: " << path << std::endl;
+    return 1;
+  }
+
+  int DoCrc(const char *filename)
+  {
+    FILE *file = fopen(filename, "rb");
+    if (!file)
+    {
+      std::cerr << "[DoCrc] Can't open file '" << filename << "'" << std::endl;
+      return 0;
+    }
+
+    unsigned char buffer[4096];
+    crc8::crc_t checksum = 0;
+    size_t bytesRead = 0;
+    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0)
+    {
+      checksum = crc8::crc_update(checksum, buffer, bytesRead);
+    }
+
+    if (ferror(file))
+    {
+      std::cerr << "[DoCrc] File read error." << std::endl;
+      fclose(file);
+      return 0;
+    }
+
+    fclose(file);
+
+    std::cout << "[DoCrc] " << filename << " CRC-8 = 0x"
+              << std::hex << std::uppercase << std::setw(2)
+              << std::setfill('0') << static_cast<unsigned int>(checksum)
+              << std::nouppercase << std::dec << std::setfill(' ') << std::endl;
+    return 1;
   }
 
   /**

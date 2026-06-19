@@ -120,12 +120,18 @@ void PrintUsage(const char* progName) {
     std::cout << "  -x  <file>  <address>         Upload program and execute\n";
     std::cout << "  -r  <address>                 Execute program (Does not work !)\n";
     std::cout << "  -dump  <file>                 Dump BIOS to file\n\n";
+    std::cout << "  --ls <path>                   List files and directories\n";
+    std::cout << "  --rm <path>                   Remove a file or empty directory\n";
+    std::cout << "  --crc <file>                  Print CRC-8 for a file\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
     std::cout << "  " << prog << " -u data.bin 0x200000\n";
     std::cout << "  " << prog << " -x prog.bin 0x200000\n";
     std::cout << "  " << prog << " -r 0x200000\n";
     std::cout << "  " << prog << " -c\n";
+    std::cout << "  " << prog << " --ls cd/data\n";
+    std::cout << "  " << prog << " --rm old.bin\n";
+    std::cout << "  " << prog << " --crc boot.bin\n";
 }
 
 /**
@@ -139,7 +145,7 @@ struct CommandLineArgs {
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
     bool verbose = false; ///< Verbose proxy tracing
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     unsigned int address = 0; ///< Address for transfer/execute
     unsigned int length = 0; ///< Length for download
@@ -167,6 +173,9 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
         ("r,r", po::value<std::string>(), "Run: <address>")
+        ("ls", po::value<std::string>(), "List files and directories: <path>")
+        ("rm", po::value<std::string>(), "Remove a file or empty directory: <path>")
+        ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
         ("help,h", "Help: Show this help message")
         ("dump,D", po::value<std::string>(), "Dump BIOS: <file>");
 
@@ -183,6 +192,12 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
                 token = "--verbose";
             } else if (token == "-help") {
                 token = "--help";
+            } else if (token == "-ls") {
+                token = "--ls";
+            } else if (token == "-rm") {
+                token = "--rm";
+            } else if (token == "-crc") {
+                token = "--crc";
             }
             normalizedArgs.push_back(token);
         }
@@ -211,7 +226,17 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         args.serial = vm["s"].as<std::string>();
     }
     if (vm.count("l")) {
-        args.command = CommandLineArgs::LIST;
+        args.command = CommandLineArgs::LIST_DEVICES;
+    }
+    if (vm.count("ls")) {
+        args.command = CommandLineArgs::LS;
+        args.filename = vm["ls"].as<std::string>();
+    } else if (vm.count("rm")) {
+        args.command = CommandLineArgs::RM;
+        args.filename = vm["rm"].as<std::string>();
+    } else if (vm.count("crc")) {
+        args.command = CommandLineArgs::CRC;
+        args.filename = vm["crc"].as<std::string>();
     }
     if (vm.count("c")) {
         args.console = true;
@@ -281,7 +306,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (args.command == CommandLineArgs::LIST) {
+    if (args.command == CommandLineArgs::LIST_DEVICES) {
         ftdi::ListDevices(args.vid, args.pid);
         exit(EXIT_SUCCESS);
     }
@@ -314,6 +339,15 @@ int main(int argc, char *argv[])
                 break;
             case CommandLineArgs::DUMP:
                 xfer::DoBiosDump(args.filename.c_str());
+                break;
+            case CommandLineArgs::LS:
+                xfer::DoList(args.filename.c_str());
+                break;
+            case CommandLineArgs::RM:
+                xfer::DoRemove(args.filename.c_str());
+                break;
+            case CommandLineArgs::CRC:
+                xfer::DoCrc(args.filename.c_str());
                 break;
             default:
                 break;
