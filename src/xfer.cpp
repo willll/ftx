@@ -435,55 +435,181 @@ namespace xfer
 
   int DoSdUpload(const char *host_filename, const char *saturn_sd_path)
   {
+    auto write_all = [](const unsigned char *data, size_t length,
+                        const char *stage) -> bool
+    {
+      size_t sent = 0;
+      while (sent < length)
+      {
+        const int status =
+            ftdi_write_data(&ftdi::g_Device, data + sent, length - sent);
+        if (status < 0)
+        {
+          std::cerr << "[DoSdUpload] " << stage
+                    << " write error: "
+                    << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+          return false;
+        }
+        if (status == 0)
+        {
+          continue;
+        }
+        sent += static_cast<size_t>(status);
+      }
+      return true;
+    };
+
+    auto read_one = [](unsigned char *outByte) -> bool
+    {
+      int status = 0;
+      do
+      {
+        status = ftdi_read_data(&ftdi::g_Device, outByte, 1);
+        if (status < 0)
+        {
+          std::cerr << "[DoSdUpload] Read result error: "
+                    << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+          return false;
+        }
+      } while (status == 0);
+
+      return true;
+    };
+
+    char *end = nullptr;
+    const unsigned long parsed = std::strtoul(saturn_sd_path, &end, 0);
+    if (saturn_sd_path == end || (end != nullptr && *end != '\0') ||
+        parsed > 0xFFFFFFFFUL)
+    {
+      std::cerr << "[DoSdUpload] Invalid SD sector: '" << saturn_sd_path
+                << "'. Expected a numeric sector index." << std::endl;
+      return 0;
+    }
+
+    const uint32_t start_sector = static_cast<uint32_t>(parsed);
+
+    const char *filename_for_display = host_filename;
+    for (const char *p = host_filename; *p != '\0'; ++p)
+    {
+      if (*p == '/' || *p == '\\')
+      {
+        filename_for_display = p + 1;
+      }
+    }
+
+    const uint32_t filename_len =
+        static_cast<uint32_t>(std::strlen(filename_for_display));
+
     FILE *file = fopen(host_filename, "rb");
     if (!file)
+    {
+      std::cerr << "[DoSdUpload] Can't open file '" << host_filename << "'"
+                << std::endl;
       return 0;
+    }
 
     // Get File Size
     fseek(file, 0, SEEK_END);
-    uint32_t file_size = ftell(file);
+    const long file_size_long = ftell(file);
     fseek(file, 0, SEEK_SET);
+    if (file_size_long < 0)
+    {
+      std::cerr << "[DoSdUpload] Failed to determine file size." << std::endl;
+      fclose(file);
+      return 0;
+    }
 
-    uint32_t path_len = strlen(saturn_sd_path) + 1; // +1 for Null terminator
+    const uint32_t file_size = static_cast<uint32_t>(file_size_long);
 
     // 1. Send Command (0x10)
     unsigned char cmd = 0x10;
-    ftdi_write_data(&ftdi::g_Device, &cmd, 1);
+    if (!write_all(&cmd, 1, "Command"))
+    {
+      fclose(file);
+      return 0;
+    }
 
-    // 2. Send Path Length (Big Endian)
-    unsigned char len_buf[4] = {static_cast<unsigned char>(path_len >> 24),
-                  static_cast<unsigned char>(path_len >> 16),
-                  static_cast<unsigned char>(path_len >> 8),
-                  static_cast<unsigned char>(path_len)};
-    ftdi_write_data(&ftdi::g_Device, len_buf, 4);
+    // 2. Send display filename length (Big Endian)
+    const unsigned char filename_len_buf[4] = {
+        static_cast<unsigned char>(filename_len >> 24),
+        static_cast<unsigned char>(filename_len >> 16),
+        static_cast<unsigned char>(filename_len >> 8),
+        static_cast<unsigned char>(filename_len)};
+    if (!write_all(filename_len_buf, 4, "Filename length"))
+    {
+      fclose(file);
+      return 0;
+    }
 
-    // 3. Send Saturn Path String
-    ftdi_write_data(&ftdi::g_Device, (unsigned char *)saturn_sd_path, path_len);
+    // 3. Send display filename bytes
+    if (filename_len != 0 &&
+        !write_all(reinterpret_cast<const unsigned char *>(filename_for_display),
+                   filename_len, "Filename"))
+    {
+      fclose(file);
+      return 0;
+    }
 
-    // 4. Send File Size (Big Endian)
-    unsigned char size_buf[4] = {static_cast<unsigned char>(file_size >> 24),
-                   static_cast<unsigned char>(file_size >> 16),
-                   static_cast<unsigned char>(file_size >> 8),
-                   static_cast<unsigned char>(file_size)};
-    ftdi_write_data(&ftdi::g_Device, size_buf, 4);
+    // 4. Send SD start sector (Big Endian)
+    const unsigned char sector_buf[4] = {
+        static_cast<unsigned char>(start_sector >> 24),
+        static_cast<unsigned char>(start_sector >> 16),
+        static_cast<unsigned char>(start_sector >> 8),
+        static_cast<unsigned char>(start_sector)};
+    if (!write_all(sector_buf, 4, "Start sector"))
+    {
+      fclose(file);
+      return 0;
+    }
 
-    // 5. Send File Data & Calculate CRC
+    // 5. Send File Size (Big Endian)
+    const unsigned char size_buf[4] = {
+        static_cast<unsigned char>(file_size >> 24),
+        static_cast<unsigned char>(file_size >> 16),
+        static_cast<unsigned char>(file_size >> 8),
+        static_cast<unsigned char>(file_size)};
+    if (!write_all(size_buf, 4, "File size"))
+    {
+      fclose(file);
+      return 0;
+    }
+
+    // 6. Send File Data & Calculate CRC
     unsigned char buffer[4096];
     crc8::crc_t checksum = 0;
     size_t bytes_read;
     while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0)
     {
-      ftdi_write_data(&ftdi::g_Device, buffer, bytes_read);
+      if (!write_all(buffer, bytes_read, "File data"))
+      {
+        fclose(file);
+        return 0;
+      }
       checksum = crc8::crc_update(checksum, buffer, bytes_read);
     }
+
+    if (ferror(file))
+    {
+      std::cerr << "[DoSdUpload] File read error." << std::endl;
+      fclose(file);
+      return 0;
+    }
+
     fclose(file);
 
-    // 6. Send Checksum
-    ftdi_write_data(&ftdi::g_Device, &checksum, 1);
+    // 7. Send Checksum
+    if (!write_all(&checksum, 1, "Checksum"))
+    {
+      return 0;
+    }
 
-    // 7. Read Result
+    // 8. Read Result
     unsigned char result;
-    ftdi_read_data(&ftdi::g_Device, &result, 1);
+    if (!read_one(&result))
+    {
+      return 0;
+    }
+
     return (result == 0x00) ? 1 : 0;
   }
 
