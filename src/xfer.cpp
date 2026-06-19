@@ -30,15 +30,14 @@
 #include <ftdi.h>
 
 #include <chrono>
-#include <filesystem>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <vector>
-#include <algorithm>
+#include <thread>
 
 #include "crc.hpp"
 #include "ftdi.hpp"
@@ -53,7 +52,196 @@ namespace xfer
 
   namespace
   {
-    using DirectoryEntry = std::filesystem::directory_entry;
+    constexpr uint8_t REMOTE_IO_MAGIC[4] = {'S', 'R', 'L', '1'};
+
+    enum class RemoteIoCommand : uint8_t
+    {
+      LIST = 1,
+      REMOVE = 2,
+      CRC = 3
+    };
+
+    enum class RemoteIoStatus : uint8_t
+    {
+      OK = 0,
+      ERROR = 1,
+      UNSUPPORTED = 2,
+      BAD_REQUEST = 3
+    };
+
+    struct RemoteIoReply
+    {
+      RemoteIoStatus status = RemoteIoStatus::ERROR;
+      std::string payload;
+    };
+
+    bool WriteAllToDevice(const uint8_t *data, std::size_t size)
+    {
+      std::size_t written = 0;
+      while (written < size)
+      {
+        int rc = ftdi_write_data(&ftdi::g_Device,
+                                 const_cast<unsigned char *>(data + written),
+                                 static_cast<int>(size - written));
+        if (rc < 0)
+        {
+          std::cerr << "[RemoteIO] Write error: "
+                    << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+          return false;
+        }
+        if (rc == 0)
+        {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+          continue;
+        }
+        written += static_cast<std::size_t>(rc);
+      }
+      return true;
+    }
+
+    bool ReadExactFromDevice(uint8_t *data, std::size_t size,
+                             int max_idle_cycles = 5000)
+    {
+      std::size_t read = 0;
+      int idleCycles = 0;
+
+      while (read < size)
+      {
+        int rc = ftdi_read_data(&ftdi::g_Device,
+                                reinterpret_cast<unsigned char *>(data + read),
+                                static_cast<int>(size - read));
+        if (rc < 0)
+        {
+          std::cerr << "[RemoteIO] Read error: "
+                    << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+          return false;
+        }
+        if (rc == 0)
+        {
+          if (++idleCycles >= max_idle_cycles)
+          {
+            std::cerr << "[RemoteIO] Timeout waiting for device reply." << std::endl;
+            return false;
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+          continue;
+        }
+        idleCycles = 0;
+        read += static_cast<std::size_t>(rc);
+      }
+      return true;
+    }
+
+    bool SendRemoteIoCommand(RemoteIoCommand command, const char *argument)
+    {
+      if (argument == nullptr)
+      {
+        std::cerr << "[RemoteIO] Missing command argument." << std::endl;
+        return false;
+      }
+
+      const std::size_t payloadLen = std::strlen(argument);
+      if (payloadLen > 0xFFFFU)
+      {
+        std::cerr << "[RemoteIO] Path/file argument too long." << std::endl;
+        return false;
+      }
+
+      uint8_t header[7] = {
+          REMOTE_IO_MAGIC[0],
+          REMOTE_IO_MAGIC[1],
+          REMOTE_IO_MAGIC[2],
+          REMOTE_IO_MAGIC[3],
+          static_cast<uint8_t>(command),
+          static_cast<uint8_t>((payloadLen >> 8) & 0xFFU),
+          static_cast<uint8_t>(payloadLen & 0xFFU)};
+
+      if (!WriteAllToDevice(header, sizeof(header)))
+      {
+        return false;
+      }
+
+      if (payloadLen > 0 &&
+          !WriteAllToDevice(reinterpret_cast<const uint8_t *>(argument), payloadLen))
+      {
+        return false;
+      }
+
+      return true;
+    }
+
+    // Returns: 1 = reply received, 0 = timed out (no more data), -1 = protocol error
+    int TryReadRemoteIoReply(RemoteIoReply &reply, int header_idle_cycles)
+    {
+      uint8_t header[7] = {};
+      // Use the short timeout only for the header; if nothing arrives, it's end-of-list.
+      if (!ReadExactFromDevice(header, sizeof(header), header_idle_cycles))
+      {
+        // Distinguish timeout (idle cycles exhausted) from read error by checking
+        // whether we received any bytes at all.  ReadExactFromDevice already printed
+        // a message for actual errors; for a clean timeout we just return 0.
+        return 0;
+      }
+
+      if (std::memcmp(header, REMOTE_IO_MAGIC, sizeof(REMOTE_IO_MAGIC)) != 0)
+      {
+        std::cerr << "[RemoteIO] Invalid response magic from device." << std::endl;
+        return -1;
+      }
+
+      reply.status = static_cast<RemoteIoStatus>(header[4]);
+      const std::size_t payloadLen =
+          (static_cast<std::size_t>(header[5]) << 8) |
+          static_cast<std::size_t>(header[6]);
+
+      reply.payload.clear();
+      reply.payload.resize(payloadLen);
+      if (payloadLen > 0 &&
+          !ReadExactFromDevice(reinterpret_cast<uint8_t *>(&reply.payload[0]),
+                               payloadLen))
+      {
+        return -1;
+      }
+      return 1;
+    }
+
+    bool ReadRemoteIoReply(RemoteIoReply &reply)
+    {
+      return TryReadRemoteIoReply(reply, 5000) == 1;
+    }
+
+    int ExecuteRemoteIoCommand(RemoteIoCommand command, const char *argument,
+                               const char *label)
+    {
+      if (!SendRemoteIoCommand(command, argument))
+      {
+        return 0;
+      }
+
+      RemoteIoReply reply;
+      if (!ReadRemoteIoReply(reply))
+      {
+        return 0;
+      }
+
+      if (!reply.payload.empty())
+      {
+        std::cout << reply.payload;
+        if (reply.payload.back() != '\n')
+        {
+          std::cout << std::endl;
+        }
+      }
+
+      if (reply.status == RemoteIoStatus::OK)
+      {
+        return 1;
+      }
+
+      std::cerr << "[" << label << "] Device returned status "
+                << static_cast<int>(reply.status) << std::endl;
+      return 0;
+    }
   }
 
   unsigned char SendBuf[2 * WRITE_PAYLOAD_SIZE];
@@ -134,119 +322,66 @@ namespace xfer
 
   int DoList(const char *path)
   {
-    std::error_code ec;
-    std::filesystem::path inputPath(path);
-
-    if (!std::filesystem::exists(inputPath, ec))
+    if (!SendRemoteIoCommand(RemoteIoCommand::LIST, path))
     {
-      std::cerr << "[DoList] Path does not exist: " << path << std::endl;
       return 0;
     }
 
-    if (std::filesystem::is_regular_file(inputPath, ec))
+    // First packet uses the full timeout so the device has time to respond.
+    RemoteIoReply reply;
+    if (!ReadRemoteIoReply(reply))
     {
-      std::cout << "[DoList] " << inputPath.filename().string() << " [F]"
-                << std::endl;
-      return 1;
-    }
-
-    if (!std::filesystem::is_directory(inputPath, ec))
-    {
-      std::cerr << "[DoList] Path is neither a file nor a directory: " << path
-                << std::endl;
       return 0;
     }
 
-    std::vector<DirectoryEntry> entries;
-    for (const auto &entry : std::filesystem::directory_iterator(inputPath, ec))
+    for (;;)
     {
-      if (ec)
+      if (!reply.payload.empty())
       {
-        std::cerr << "[DoList] Directory iteration error: "
-                  << ec.message() << std::endl;
+        std::cout << reply.payload;
+        if (reply.payload.back() != '\n')
+        {
+          std::cout << '\n';
+        }
+      }
+
+      if (reply.status != RemoteIoStatus::OK)
+      {
+        std::cerr << "[DoList] Device returned status "
+                  << static_cast<int>(reply.status) << std::endl;
         return 0;
       }
-      entries.push_back(entry);
+
+      if (reply.payload.empty())
+      {
+        // Empty payload + OK = explicit end-of-listing sentinel from device.
+        return 1;
+      }
+
+      // Try to read the next packet.  Use a short inter-packet timeout (200 ms)
+      // so that a single-packet response exits promptly instead of hanging for
+      // the full 5-second idle timeout.
+      const int rc = TryReadRemoteIoReply(reply, 200);
+      if (rc == 0)
+      {
+        // Timeout: no more packets — listing is complete.
+        return 1;
+      }
+      if (rc < 0)
+      {
+        return 0;
+      }
     }
-
-    std::sort(entries.begin(), entries.end(),
-              [](const DirectoryEntry &lhs, const DirectoryEntry &rhs) {
-                return lhs.path().filename().string() < rhs.path().filename().string();
-              });
-
-    std::cout << "[DoList] Listing: " << inputPath.string() << std::endl;
-    for (const auto &entry : entries)
-    {
-      std::error_code statusEc;
-      const bool isDir = entry.is_directory(statusEc);
-      const bool isFile = entry.is_regular_file(statusEc);
-      std::cout << "  " << (isDir ? "[D]" : isFile ? "[F]" : "[?]") << " "
-                << entry.path().filename().string() << std::endl;
-    }
-
-    return 1;
   }
 
   int DoRemove(const char *path)
   {
-    std::error_code ec;
-    const std::filesystem::path target(path);
-
-    if (!std::filesystem::exists(target, ec))
-    {
-      std::cerr << "[DoRemove] Path does not exist: " << path << std::endl;
-      return 0;
-    }
-
-    if (!std::filesystem::remove(target, ec))
-    {
-      if (ec)
-      {
-        std::cerr << "[DoRemove] Remove failed: " << ec.message() << std::endl;
-      }
-      else
-      {
-        std::cerr << "[DoRemove] Path not removed (directory may not be empty): "
-                  << path << std::endl;
-      }
-      return 0;
-    }
-
-    std::cout << "[DoRemove] Removed: " << path << std::endl;
-    return 1;
+    return ExecuteRemoteIoCommand(RemoteIoCommand::REMOVE, path, "DoRemove");
   }
 
   int DoCrc(const char *filename)
   {
-    FILE *file = fopen(filename, "rb");
-    if (!file)
-    {
-      std::cerr << "[DoCrc] Can't open file '" << filename << "'" << std::endl;
-      return 0;
-    }
-
-    unsigned char buffer[4096];
-    crc8::crc_t checksum = 0;
-    size_t bytesRead = 0;
-    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0)
-    {
-      checksum = crc8::crc_update(checksum, buffer, bytesRead);
-    }
-
-    if (ferror(file))
-    {
-      std::cerr << "[DoCrc] File read error." << std::endl;
-      fclose(file);
-      return 0;
-    }
-
-    fclose(file);
-
-    std::cout << "[DoCrc] " << filename << " CRC-8 = 0x"
-              << std::hex << std::uppercase << std::setw(2)
-              << std::setfill('0') << static_cast<unsigned int>(checksum)
-              << std::nouppercase << std::dec << std::setfill(' ') << std::endl;
-    return 1;
+    return ExecuteRemoteIoCommand(RemoteIoCommand::CRC, filename, "DoCrc");
   }
 
   /**
