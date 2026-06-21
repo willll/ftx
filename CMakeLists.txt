@@ -57,6 +57,7 @@ pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
 # link to it in a target-oriented way instead of using raw variables everywhere.
 add_library(libftdi1_pkgconfig INTERFACE)
 target_include_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS})
+target_link_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARY_DIRS})
 target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARIES})
 
 # When building statically on Linux, libusb may require libudev; add it
