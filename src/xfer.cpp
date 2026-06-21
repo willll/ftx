@@ -65,14 +65,14 @@ namespace xfer
     enum class RemoteIoStatus : uint8_t
     {
       OK = 0,
-      ERROR = 1,
+      ERR = 1,
       UNSUPPORTED = 2,
       BAD_REQUEST = 3
     };
 
     struct RemoteIoReply
     {
-      RemoteIoStatus status = RemoteIoStatus::ERROR;
+      RemoteIoStatus status = RemoteIoStatus::ERR;
       std::string payload;
     };
 
