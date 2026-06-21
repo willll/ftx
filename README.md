@@ -1,7 +1,10 @@
-[![Build Ftx Windows](https://github.com/willll/ftx/actions/workflows/build-windows.yml/badge.svg)](https://github.com/willll/ftx/actions/workflows/build-windows.yml) | [![Build Ftx Linux](https://github.com/willll/ftx/actions/workflows/build-linux.yml/badge.svg)](https://github.com/willll/ftx/actions/workflows/build-linux.yml)
+[![Build Ftx Windows](https://github.com/willll/ftx/actions/workflows/build-windows.yml/badge.svg)](https://github.com/willll/ftx/actions/workflows/build-windows.yml) | [![Build Ftx Linux](https://github.com/willll/ftx/actions/workflows/build-linux.yml/badge.svg)](https://github.com/willll/ftx/actions/workflows/build-linux.yml) | [![Build Ftx macOS](https://github.com/willll/ftx/actions/workflows/build-macos.yml/badge.svg)](https://github.com/willll/ftx/actions/workflows/build-macos.yml)
 
 # Sega Saturn USB Flash Cart Transfer Utility
 
+<p align="center">
+  <img src="assets/ftx_logo.png" width="256" alt="FTX Logo">
+</p>
 
 This project provides a modern C++17 command-line utility for transferring data to and from a Sega Saturn USB flash cartridge. It supports downloading, uploading, and executing binaries on the device, with robust error handling, execution tracing, and cross-platform support via CMake.
 

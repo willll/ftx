@@ -59,7 +59,8 @@ namespace xfer
     {
       LIST = 1,
       REMOVE = 2,
-      CRC = 3
+      CRC = 3,
+      UPLOAD = 4
     };
 
     enum class RemoteIoStatus : uint8_t
@@ -774,6 +775,91 @@ namespace xfer
 
   int DoSdUpload(const char *host_filename, const char *saturn_sd_path)
   {
+    if (saturn_sd_path != nullptr && saturn_sd_path[0] == '/')
+    {
+      if (!SendRemoteIoCommand(RemoteIoCommand::UPLOAD, saturn_sd_path))
+      {
+        return 0;
+      }
+
+      RemoteIoReply reply;
+      if (!ReadRemoteIoReply(reply))
+      {
+        return 0;
+      }
+
+      if (reply.status != RemoteIoStatus::OK)
+      {
+        std::cerr << "[DoSdUpload] Device rejected upload: "
+                  << static_cast<int>(reply.status) << std::endl;
+        return 0;
+      }
+
+      FILE *file = fopen(host_filename, "rb");
+      if (!file)
+      {
+        std::cerr << "[DoSdUpload] Can't open file '" << host_filename << "'" << std::endl;
+        return 0;
+      }
+
+      fseek(file, 0, SEEK_END);
+      const long file_size_long = ftell(file);
+      fseek(file, 0, SEEK_SET);
+      if (file_size_long < 0)
+      {
+        std::cerr << "[DoSdUpload] Failed to determine file size." << std::endl;
+        fclose(file);
+        return 0;
+      }
+
+      const uint32_t file_size = static_cast<uint32_t>(file_size_long);
+
+      const unsigned char size_buf[4] = {
+          static_cast<unsigned char>(file_size >> 24),
+          static_cast<unsigned char>(file_size >> 16),
+          static_cast<unsigned char>(file_size >> 8),
+          static_cast<unsigned char>(file_size)};
+      if (!WriteAllToDevice(size_buf, 4))
+      {
+        fclose(file);
+        return 0;
+      }
+
+      unsigned char buffer[4096];
+      crc8::crc_t checksum = 0;
+      size_t bytes_read;
+      while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0)
+      {
+        if (!WriteAllToDevice(buffer, bytes_read))
+        {
+          fclose(file);
+          return 0;
+        }
+        checksum = crc8::crc_update(checksum, buffer, bytes_read);
+      }
+
+      fclose(file);
+
+      if (!WriteAllToDevice(&checksum, 1))
+      {
+        return 0;
+      }
+
+      unsigned char result;
+      if (!ReadExactFromDevice(&result, 1))
+      {
+        return 0;
+      }
+
+      if (result != 0x00)
+      {
+        std::cerr << "[DoSdUpload] Device reported CRC error." << std::endl;
+        return 0;
+      }
+
+      return 1;
+    }
+
     auto write_all = [](const unsigned char *data, size_t length,
                         const char *stage) -> bool
     {

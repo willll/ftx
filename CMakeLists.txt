@@ -89,6 +89,7 @@ add_executable(ftx
 
 # win32 config
 if (WIN32)
+  target_sources(ftx PRIVATE src/ftx.rc)
   # CMake already defines WIN32; add unicode defines for MSVC if needed.
   target_compile_definitions(ftx PRIVATE UNICODE _UNICODE)
   set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
