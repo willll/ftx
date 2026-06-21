@@ -339,43 +339,51 @@ int main(int argc, char *argv[])
         signal(SIGFPE, CoreDumpSignalHandler);
         signal(SIGILL, CoreDumpSignalHandler);
 
+        int status = 1;
         switch (args.command) {
             case CommandLineArgs::DOWNLOAD:
-                xfer::DoDownload(args.filename.c_str(), args.address, args.length);
+                status = xfer::DoDownload(args.filename.c_str(), args.address, args.length);
                 break;
             case CommandLineArgs::UPLOAD:
-                xfer::DoUpload(args.filename.c_str(), args.address);
+                status = xfer::DoUpload(args.filename.c_str(), args.address);
                 break;
             case CommandLineArgs::EXEC:
-                xfer::DoExecute(args.filename.c_str(), args.address);
+                status = xfer::DoExecute(args.filename.c_str(), args.address);
                 break;
             case CommandLineArgs::RUN:
-                xfer::DoRun(args.address);
+                status = xfer::DoRun(args.address);
                 break;
             case CommandLineArgs::DUMP:
-                xfer::DoBiosDump(args.filename.c_str());
+                status = xfer::DoBiosDump(args.filename.c_str());
                 break;
             case CommandLineArgs::LS:
-                xfer::DoList(args.filename.c_str());
+                status = xfer::DoList(args.filename.c_str());
                 break;
             case CommandLineArgs::RM:
-                xfer::DoRemove(args.filename.c_str());
+                status = xfer::DoRemove(args.filename.c_str());
                 break;
             case CommandLineArgs::CP:
-                xfer::DoSdUpload(args.filename.c_str(), args.target.c_str());
+                status = xfer::DoSdUpload(args.filename.c_str(), args.target.c_str());
                 break;
             case CommandLineArgs::CRC:
-                xfer::DoCrc(args.filename.c_str());
+                status = xfer::DoCrc(args.filename.c_str());
                 break;
             default:
                 break;
         }
+
+        if (status == 0) {
+            return EXIT_FAILURE;
+        }
+        
         if (args.tcp_proxy) {
             return ftdi::DoTcpProxy(args.tcp_port, args.verbose);
         }
         if (args.console) {
             ftdi::DoConsole();
         }
+    } else {
+        return EXIT_FAILURE;
     }
  
     return EXIT_SUCCESS;

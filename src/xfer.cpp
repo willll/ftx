@@ -383,17 +383,17 @@ namespace xfer
     // Step 3: Calculate transfer speed in KB/s
     double speed_kb_s = (size / 1024.0) / seconds;
     // Step 4: Output transfer time
-    std::cout << "Transfer time: " << std::fixed << std::setprecision(3)
+    cdbg << "Transfer time: " << std::fixed << std::setprecision(3)
               << seconds << " s" << std::endl;
     // Step 5: Output transfer speed
-    std::cout << "Transfer speed: " << std::fixed << std::setprecision(2)
+    cdbg << "Transfer speed: " << std::fixed << std::setprecision(2)
               << speed_kb_s << " KB/s" << std::endl;
   }
 
   int DoBiosDump(const char *filename)
   {
     // Step 1: Log the start of the BIOS dump process
-    std::cout << "[DoBiosDump] Starting BIOS dump to file: " << filename
+    cdbg << "[DoBiosDump] Starting BIOS dump to file: " << filename
               << std::endl;
     // Step 2: Call DoDownload to perform the dump from the BIOS address and size
     return DoDownload(filename, saturn::bios_address, saturn::bios_size);
@@ -474,7 +474,7 @@ namespace xfer
   {
     // Step 1: Log the start of the download process with file, address, and size
     // details
-    std::cout << "[DoDownload] Starting download: file='" << filename
+    cdbg << "[DoDownload] Starting download: file='" << filename
               << "', address=0x" << std::hex << address << ", size=" << std::dec
               << size << std::endl;
     // Step 2: Allocate a buffer to store the downloaded data
@@ -486,7 +486,7 @@ namespace xfer
     // Step 3: Record the start time for performance measurement
     auto before = std::chrono::steady_clock::now();
     // Step 4: Log sending of the download command
-    std::cout << "[DoDownload] Sending download command..." << std::endl;
+    cdbg << "[DoDownload] Sending download command..." << std::endl;
     // Step 5: Send the download command to the device
     status =
         xfer::SendCommandWithAddressAndLength(USBDC_FUNC_DOWNLOAD, address, size);
@@ -499,7 +499,7 @@ namespace xfer
     }
 
     // Step 7: Log the start of data reading from the device
-    std::cout << "[DoDownload] Reading data from device..." << std::endl;
+    cdbg << "[DoDownload] Reading data from device..." << std::endl;
     // Step 8: Read data from the device until all requested bytes are received
     while (size - received > 0 && !ftdi::g_interrupt_flag)
     {
@@ -514,12 +514,12 @@ namespace xfer
       }
       received += status;
       // Step 10: Log progress of received bytes
-      std::cout << "[DoDownload] Received " << received << "/" << size
+      cdbg << "[DoDownload] Received " << received << "/" << size
                 << " bytes..." << std::endl;
     }
 
     // Step 11: Log waiting for the checksum byte
-    std::cout << "[DoDownload] Waiting for checksum byte..." << std::endl;
+    cdbg << "[DoDownload] Waiting for checksum byte..." << std::endl;
     // Step 12: Read the checksum byte, looping until received or an error occurs
     do
     {
@@ -537,12 +537,12 @@ namespace xfer
     // Step 14: Record the end time for performance measurement
     auto after = std::chrono::steady_clock::now();
     // Step 15: Log and calculate performance metrics
-    std::cout << "[DoDownload] Data received. Calculating performance..."
+    cdbg << "[DoDownload] Data received. Calculating performance..."
               << std::endl;
     xfer::ReportPerformance(before, after, size);
 
     // Step 16: Log and calculate the CRC checksum of the received data
-    std::cout << "[DoDownload] Calculating CRC..." << std::endl;
+    cdbg << "[DoDownload] Calculating CRC..." << std::endl;
     calcChecksum = crc8::crc_update(calcChecksum, pFileBuffer.get(), size);
 
     // Step 17: Verify the calculated checksum against the received checksum
@@ -556,7 +556,7 @@ namespace xfer
     }
 
     // Step 19: Log and open the output file for writing
-    std::cout << "[DoDownload] Writing to file..." << std::endl;
+    cdbg << "[DoDownload] Writing to file..." << std::endl;
     File = fopen(filename, "wb");
     if (File == nullptr)
     {
@@ -569,7 +569,7 @@ namespace xfer
     // Step 22: Close the file
     fclose(File);
     // Step 23: Log successful completion
-    std::cout << "[DoDownload] Download complete." << std::endl;
+    cdbg << "[DoDownload] Download complete." << std::endl;
     // Step 24: Return success or failure based on status
     return status < 0 ? 0 : 1;
   }
@@ -586,7 +586,7 @@ namespace xfer
     std::string functnName = execute ? "DoUploadExecute" : "DoUpload";
 
     // Step 2: Log the start of the upload process
-    std::cout << "[" << functnName << "] Starting upload: file='" << filename
+    cdbg << "[" << functnName << "] Starting upload: file='" << filename
               << "', address=0x" << std::hex << address << std::dec << std::endl;
     // Step 3: Open the input file for reading
     FILE *File = fopen(filename, "rb");
@@ -633,13 +633,13 @@ namespace xfer
     // Step 13: Set the command based on whether execution is requested
     if (execute)
     {
-      std::cout << "[" << functnName << "] Uploading and executing at address 0x"
+      cdbg << "[" << functnName << "] Uploading and executing at address 0x"
                 << std::hex << address << std::dec << std::endl;
       SendBuf[0] = USBDC_FUNC_EXEC_EXT;
     }
     else
     {
-      std::cout << "[" << functnName << "] Uploading to address 0x" << std::hex
+      cdbg << "[" << functnName << "] Uploading to address 0x" << std::hex
                 << address << std::dec << std::endl;
       SendBuf[0] = USBDC_FUNC_UPLOAD;
     }
@@ -667,7 +667,7 @@ namespace xfer
       }
       sent += status;
       // Step 18: Log progress of sent bytes
-      std::cout << "[" << functnName << "] Sent " << sent << "/" << size
+      cdbg << "[" << functnName << "] Sent " << sent << "/" << size
                 << " bytes..." << std::endl;
     }
 
@@ -707,7 +707,7 @@ namespace xfer
     auto after = std::chrono::steady_clock::now();
     xfer::ReportPerformance(before, after, size);
     // Step 25: Log successful completion
-    std::cout << "[" << functnName << "] Upload complete." << std::endl;
+    cdbg << "[" << functnName << "] Upload complete." << std::endl;
 
     // Step 26: Return success
     return 1;
@@ -721,7 +721,7 @@ namespace xfer
   int DoRun(uint32_t address)
   {
     // Step 1: Log the execution attempt at the specified address
-    std::cout << "[DoRun] Executing at address 0x" << std::hex << address
+    cdbg << "[DoRun] Executing at address 0x" << std::hex << address
               << std::dec << std::endl;
     // Step 2: Set the execute command in the send buffer
     SendBuf[0] = USBDC_FUNC_EXEC;
@@ -740,7 +740,7 @@ namespace xfer
       return 0;
     }
     // Step 6: Log successful command send
-    std::cout << "[DoRun] Execute command sent successfully." << std::endl;
+    cdbg << "[DoRun] Execute command sent successfully." << std::endl;
     // Step 7: Return success
     return 1;
   }
@@ -754,14 +754,14 @@ namespace xfer
   int DoExecute(const char *filename, uint32_t address)
   {
     // Step 1: Log the start of the upload and execute process
-    std::cout << "[DoExecute] Uploading and executing: file='" << filename
+    cdbg << "[DoExecute] Uploading and executing: file='" << filename
               << "', address=0x" << std::hex << address << std::dec << std::endl;
     int status = 0;
     // Step 2: Call DoUpload with execute flag set to true
     if (DoUpload(filename, address, true))
     {
       // Step 3: Log successful upload
-      std::cout << "[DoExecute] Upload successful. Executing..." << std::endl;
+      cdbg << "[DoExecute] Upload successful. Executing..." << std::endl;
     }
     else
     {
