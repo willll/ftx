@@ -157,7 +157,7 @@ namespace xfer
     bool WriteAllToDevice(const uint8_t *data, std::size_t size)
     {
       std::size_t written = 0;
-      while (written < size)
+      while (written < size && !ftdi::g_interrupt_flag)
       {
         int rc = ftdi_write_data(&ftdi::g_Device,
                                  const_cast<unsigned char *>(data + written),
@@ -175,7 +175,7 @@ namespace xfer
         }
         written += static_cast<std::size_t>(rc);
       }
-      return true;
+      return written == size;
     }
 
     bool ReadExactFromDevice(uint8_t *data, std::size_t size,
@@ -184,7 +184,7 @@ namespace xfer
       std::size_t read = 0;
       int idleCycles = 0;
 
-      while (read < size)
+      while (read < size && !ftdi::g_interrupt_flag)
       {
         int rc = ftdi_read_data(&ftdi::g_Device,
                                 reinterpret_cast<unsigned char *>(data + read),
@@ -208,7 +208,7 @@ namespace xfer
         idleCycles = 0;
         read += static_cast<std::size_t>(rc);
       }
-      return true;
+      return read == size;
     }
 
     bool SendRemoteIoCommand(RemoteIoCommand command, const char *argument)
@@ -501,7 +501,7 @@ namespace xfer
     // Step 7: Log the start of data reading from the device
     std::cout << "[DoDownload] Reading data from device..." << std::endl;
     // Step 8: Read data from the device until all requested bytes are received
-    while (size - received > 0)
+    while (size - received > 0 && !ftdi::g_interrupt_flag)
     {
       status = ftdi_read_data(&ftdi::g_Device, &pFileBuffer[received],
                               size - received);
@@ -532,7 +532,7 @@ namespace xfer
                   << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
-    } while (status == 0);
+    } while (status == 0 && !ftdi::g_interrupt_flag);
 
     // Step 14: Record the end time for performance measurement
     auto after = std::chrono::steady_clock::now();
@@ -655,7 +655,7 @@ namespace xfer
 
     // Step 16: Send the file data to the device in chunks
     unsigned int sent = 0;
-    while (size - sent > 0)
+    while (size - sent > 0 && !ftdi::g_interrupt_flag)
     {
       status = ftdi_write_data(&ftdi::g_Device, &pFileBuffer[sent], size - sent);
       if (status < 0)
@@ -693,7 +693,7 @@ namespace xfer
                   << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
-    } while (status == 0);
+    } while (status == 0 && !ftdi::g_interrupt_flag);
 
     // Step 23: Check if the device reported an upload error
     if (RecvBuf[0] != 0)
@@ -778,7 +778,7 @@ namespace xfer
                         const char *stage) -> bool
     {
       size_t sent = 0;
-      while (sent < length)
+      while (sent < length && !ftdi::g_interrupt_flag)
       {
         const int status =
             ftdi_write_data(&ftdi::g_Device, data + sent, length - sent);
@@ -810,7 +810,7 @@ namespace xfer
                     << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
           return false;
         }
-      } while (status == 0);
+      } while (status == 0 && !ftdi::g_interrupt_flag);
 
       return true;
     };
