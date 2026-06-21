@@ -52,13 +52,13 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
     // Step 1: Log the initialization attempt with VID and PID
     if (Serial.empty())
     {
-        std::cout << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID
+        cdbg << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID
                   << ", PID=0x" << PID
                   << ")" << std::dec << std::endl;
     }
     else
     {
-        std::cout << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID
+        cdbg << "[InitComms] Initializing FTDI device (VID=0x" << std::hex << VID
                   << ", PID=0x" << PID
                   << ", Serial=" << Serial
                   << ")" << std::dec << std::endl;
@@ -193,7 +193,7 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
     // Step 19: Log successful initialization if no errors
     if (!error)
     {
-        std::cout << "[InitComms] FTDI device initialized successfully." << std::endl;
+        cdbg << "[InitComms] FTDI device initialized successfully." << std::endl;
         CDBG_LOG_ON_CHANGE("InitComms.complete",
                            "[InitComms][dbg] Init complete with timeouts r/w="
                            << g_Device.usb_read_timeout << "/" << g_Device.usb_write_timeout << std::endl);
@@ -208,7 +208,7 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
 void CloseComms()
 {
     // Step 1: Log the start of the device closing process
-    std::cout << "[CloseComms] Closing FTDI device and purging buffers..." << std::endl;
+    cdbg << "[CloseComms] Closing FTDI device and purging buffers..." << std::endl;
     // Step 2: Purge the FTDI device buffers
     int status = ftdi_tcioflush(&g_Device);
     if (status < 0)
@@ -220,7 +220,7 @@ void CloseComms()
     ftdi_usb_close(&g_Device);
     ftdi_deinit(&g_Device);
     // Step 5: Log successful closure
-    std::cout << "[CloseComms] FTDI device closed." << std::endl;
+    cdbg << "[CloseComms] FTDI device closed." << std::endl;
 }
 
 } // namespace ftdi

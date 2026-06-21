@@ -70,6 +70,8 @@ const char* strsignal(int sig) {
 
 
 
+bool g_verbose = false;
+
 const int VID = 0x0403;
 const int PID = 0x6001;
 
@@ -111,7 +113,7 @@ void PrintUsage(const char* progName) {
     std::cout << "  -s  <Serial>                  Device Serial (Default : Will match VID and PID with an FTDI serial)\n";
     std::cout << "  -c                            Run debug console\n";
     std::cout << "  -g  [port]                    Run raw TCP<->FTDI proxy (Default port 1234)\n";
-    std::cout << "  -verbose                      Print traced RSP packets as GDB>/Target> lines\n";
+    std::cout << "  -verbose                      Output all dbg, execution traces, and RSP packets\n";
     std::cout << "  -l                            List available FTDI devices\n";
     std::cout << "  -help                         Help\n\n";
     std::cout << "Commands:\n";
@@ -170,7 +172,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("l,l", "List available FTDI devices")
         ("c,c", "Run debug console")
         ("g,g", po::value<std::string>()->implicit_value("1234"), "Run raw TCP proxy [optional port]")
-        ("verbose", "Print traced RSP packets as GDB>/Target> lines")
+        ("verbose", "Output all dbg, execution traces, and RSP packets")
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
@@ -312,6 +314,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
 int main(int argc, char *argv[])
 {
     CommandLineArgs args = parse_args(argc, argv);
+    g_verbose = args.verbose;
 
     if (args.command == CommandLineArgs::NONE && !args.console && !args.tcp_proxy) {
         PrintUsage(argv[0]);
