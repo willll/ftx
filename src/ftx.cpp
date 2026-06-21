@@ -175,7 +175,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
         ("r,r", po::value<std::string>(), "Run: <address>")
-        ("ls", po::value<std::string>(), "List files and directories: <path>")
+        ("ls", po::value<std::string>()->implicit_value("/"), "List files and directories: <path>")
         ("rm", po::value<std::string>(), "Remove a file or empty directory: <path>")
         ("cp", po::value<std::vector<std::string>>()->multitoken(), "Copy: <file> <sdraw:start:count>")
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
