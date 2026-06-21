@@ -52,9 +52,9 @@ make
 
 #### Debug vs Release
 
-- Debug builds (`-DCMAKE_BUILD_TYPE=Debug`) keep debug traces enabled.
-- Release builds (`-DCMAKE_BUILD_TYPE=Release`) define `NDEBUG`, so debug traces from `cdbg` and `CDBG_LOG_ON_CHANGE` are compiled out.
-- You can also force `NDEBUG` explicitly with `-DNDEBUG=ON` (independent of build type).
+- Debug builds (`-DCMAKE_BUILD_TYPE=Debug`) and Release builds now both include logging support.
+- Extensive progress logs, initialization traces, and debug outputs have been moved to a dynamic runtime toggle.
+- To view these logs during execution, pass the `--verbose` flag to the application. `ftx` is completely quiet by default to better support automated deployment scripts.
 
 #### Static Build (Linux only)
 
@@ -86,6 +86,21 @@ cmake ..
 make
 ```
 
+### macOS (Native Apple Silicon / Intel)
+
+Install dependencies via Homebrew:
+```sh
+brew install cmake boost libftdi pkg-config
+```
+
+Then build natively:
+```sh
+mkdir -p build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make
+```
+
 ## Usage
 
 ```sh
@@ -96,9 +111,11 @@ make
 
 - `-v <VID>`: Device VID (default: 0x0403)
 - `-p <PID>`: Device PID (default: 0x6001)
+- `-s <Serial>`: Match specific device by FTDI serial string
+- `-l`      : List all connected FTDI devices
 - `-c`      : Run debug console
 - `-g [port]`: Run raw TCP<->FTDI proxy (default port: 1234)
-- `-verbose`: Print traced RSP packets as `GDB>...` and `Target>...` lines
+- `--verbose`: Enable detailed progress logs, initialization traces, and print traced RSP packets as `GDB>...` and `Target>...` lines
 
 ### Commands
 
@@ -106,6 +123,11 @@ make
 - `-u <file> <address>`      : Upload data from file to device
 - `-x <file> <address>`      : Upload program and execute
 - `-r <address>`             : Execute program at address
+- `-dump <file>`             : Dump the Sega Saturn BIOS to a file
+- `--ls <path>`              : List files and directories at the specified path on the target
+- `--rm <path>`              : Remove a file or empty directory on the target
+- `--cp <file> <target>`     : Copy a file to the target (e.g., `sdraw:start:count` for raw SD sectors)
+- `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target
 
 ### Examples
 
@@ -204,13 +226,14 @@ cmake -DNDEBUG=ON ..
 make
 ```
 
-In release builds (`-DCMAKE_BUILD_TYPE=Release`) or when configured with `-DNDEBUG=ON`, debug traces are compiled out via the `NDEBUG` macro.
+In both debug and release builds, debug traces are controlled dynamically. Use the `--verbose` flag when running `ftx` to see these logs in your terminal. Building with `NDEBUG` will disable standard C++ assertions, but will no longer silence the logger.
 
 ### Error Handling
 
 - Device initialization includes automatic recovery attempts on buffer purge failures.
 - On console exit (Ctrl+C), the stdin reader thread stops within 50ms and the process exits cleanly.
 - Read/write errors to the device are reported to stderr and terminate console mode.
+- **Automated Deployment Friendly:** Returns standard `0` exit codes on success and `1` on failure for reliable integration into Makefiles and CI/CD pipelines. Transfers and initializations are completely quiet by default.
 
 ## Project Structure
 
