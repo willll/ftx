@@ -124,10 +124,11 @@ make
 - `-x <file> <address>`      : Upload program and execute
 - `-r <address>`             : Execute program at address
 - `-dump <file>`             : Dump the Sega Saturn BIOS to a file
-- `--ls <path>`              : List files and directories at the specified path on the target
+- `--ls <path>`              : List files and directories at the specified path on the target. Combine with `-l` for detailed listing with sizes and dates.
 - `--rm <path>`              : Remove a file or empty directory on the target
-- `--cp <file> <target>`     : Copy a file to the target (e.g., `sdraw:start:count` for raw SD sectors)
+- `--cp <file> <target>`     : Copy a file to the target. `<target>` can be a FAT path (e.g., `/folder/file.bin`) or raw SD sectors (`sdraw:start:count`).
 - `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target
+- `--lcrc <file>`            : Calculate and print the CRC-8 checksum for a local host file
 
 ### Examples
 
@@ -159,6 +160,30 @@ Start debug console:
 
 ```sh
 ./ftx -c
+```
+
+List files and directories on the target's SD card:
+
+```sh
+./ftx --ls /
+```
+
+Detailed listing with file sizes and modification dates:
+
+```sh
+./ftx -l --ls /SD_TEST
+```
+
+Remove a file from the target's SD card:
+
+```sh
+./ftx --rm /old_save.dat
+```
+
+Copy a file to the FAT filesystem on the target:
+
+```sh
+./ftx --cp data.bin /test_folder/data.bin
 ```
 
 ## TCP Proxy Mode

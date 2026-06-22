@@ -67,6 +67,8 @@ const char* strsignal(int sig) {
 
 #include "ftdi.hpp"
 #include "xfer.hpp"
+#include "crc.hpp"
+#include <fstream>
 
 
 
@@ -124,8 +126,9 @@ void PrintUsage(const char* progName) {
     std::cout << "  -dump  <file>                 Dump BIOS to file\n\n";
     std::cout << "  --ls <path>                   List files and directories\n";
     std::cout << "  --rm <path>                   Remove a file or empty directory\n";
-    std::cout << "  --cp <file> <sdraw:start:count> Copy a file to a raw SD range\n";
-    std::cout << "  --crc <file>                  Print CRC-8 for a file\n\n";
+    std::cout << "  --cp <file> <target>          Copy a file to a raw SD range (sdraw:start:count) or FAT filesystem path (/path)\n";
+    std::cout << "  --crc <file>                  Print CRC-8 for a file\n";
+    std::cout << "  --lcrc <file>                 Print CRC-8 for a local host file\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
     std::cout << "  " << prog << " -u data.bin 0x200000\n";
@@ -148,7 +151,7 @@ struct CommandLineArgs {
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
     bool verbose = false; ///< Verbose proxy tracing
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     std::string target; ///< Target path for copy operations
     unsigned int address = 0; ///< Address for transfer/execute
@@ -181,6 +184,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("rm", po::value<std::string>(), "Remove a file or empty directory: <path>")
         ("cp", po::value<std::vector<std::string>>()->multitoken(), "Copy: <file> <sdraw:start:count>")
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
+        ("lcrc", po::value<std::string>(), "Print CRC-8 for a local file: <file>")
         ("help,h", "Help: Show this help message")
         ("dump,D", po::value<std::string>(), "Dump BIOS: <file>");
 
@@ -205,6 +209,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
                 token = "--cp";
             } else if (token == "-crc") {
                 token = "--crc";
+            } else if (token == "-lcrc") {
+                token = "--lcrc";
             }
             normalizedArgs.push_back(token);
         }
@@ -237,7 +243,11 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     }
     if (vm.count("ls")) {
         args.command = CommandLineArgs::LS;
-        args.filename = vm["ls"].as<std::string>();
+        if (vm.count("l")) {
+            args.filename = std::string("-l ") + vm["ls"].as<std::string>();
+        } else {
+            args.filename = vm["ls"].as<std::string>();
+        }
     } else if (vm.count("rm")) {
         args.command = CommandLineArgs::RM;
         args.filename = vm["rm"].as<std::string>();
@@ -251,6 +261,9 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     } else if (vm.count("crc")) {
         args.command = CommandLineArgs::CRC;
         args.filename = vm["crc"].as<std::string>();
+    } else if (vm.count("lcrc")) {
+        args.command = CommandLineArgs::LCRC;
+        args.filename = vm["lcrc"].as<std::string>();
     }
     if (vm.count("c")) {
         args.console = true;
@@ -323,6 +336,21 @@ int main(int argc, char *argv[])
 
     if (args.command == CommandLineArgs::LIST_DEVICES) {
         ftdi::ListDevices(args.vid, args.pid);
+        exit(EXIT_SUCCESS);
+    }
+
+    if (args.command == CommandLineArgs::LCRC) {
+        std::ifstream file(args.filename, std::ios::binary);
+        if (!file) {
+            std::cerr << "Failed to open local file: " << args.filename << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        crc8::crc_t crc = 0;
+        char buffer[4096];
+        while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+            crc = crc8::crc_update(crc, reinterpret_cast<const unsigned char*>(buffer), static_cast<std::size_t>(file.gcount()));
+        }
+        std::cout << "[DoCrc] " << args.filename << " CRC-8 = 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(crc) << std::dec << std::endl;
         exit(EXIT_SUCCESS);
     }
 
