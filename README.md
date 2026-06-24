@@ -53,8 +53,8 @@ make
 #### Debug vs Release
 
 - Debug builds (`-DCMAKE_BUILD_TYPE=Debug`) and Release builds now both include logging support.
-- Extensive progress logs, initialization traces, and debug outputs have been moved to a dynamic runtime toggle.
-- To view these logs during execution, pass the `--verbose` flag to the application. `ftx` is completely quiet by default to better support automated deployment scripts.
+- Extensive progress logs, initialization traces, and debug outputs have been moved to dynamic runtime toggles.
+- To view logs during execution, pass the `-v` (GDB commands) or `-vv` (full dbg traces) flag to the application. `ftx` is completely quiet by default to better support automated deployment scripts.
 
 #### Static Build (Linux only)
 
@@ -109,13 +109,14 @@ make
 
 ### Options
 
-- `-v <VID>`: Device VID (default: 0x0403)
-- `-p <PID>`: Device PID (default: 0x6001)
+- `--vid <VID>`: Device VID (default: 0x0403)
+- `--pid <PID>`: Device PID (default: 0x6001)
 - `-s <Serial>`: Match specific device by FTDI serial string
 - `-l`      : List all connected FTDI devices
 - `-c`      : Run debug console
 - `-g [port]`: Run raw TCP<->FTDI proxy (default port: 1234)
-- `--verbose`: Enable detailed progress logs, initialization traces, and print traced RSP packets as `GDB>...` and `Target>...` lines
+- `-v`      : Print traced RSP packets as `GDB>...` and `Target>...` lines (GDB commands)
+- `-vv`     : Enable detailed progress logs, initialization traces, and GDB packet tracing
 
 ### Commands
 
@@ -196,10 +197,16 @@ Start the proxy on the default port (1234):
 ./ftx -g
 ```
 
-Start the proxy with verbose packet tracing:
+Start the proxy with GDB packet tracing:
 
 ```sh
-./ftx -g 1234 -verbose
+./ftx -g 1234 -v
+```
+
+Start the proxy with full packet tracing and dbg execution logs:
+
+```sh
+./ftx -g 1234 -vv
 ```
 
 Or on a custom port:
@@ -216,7 +223,7 @@ nc 127.0.0.1 1234
 
 Use this mode when your client already speaks the cartridge/debug protocol and you only need transport bridging over TCP.
 
-When `-verbose` is enabled, traced packet lines are printed with one packet per line:
+When `-v` or `-vv` is enabled, traced packet lines are printed with one packet per line:
 
 - `GDB>$...` for packets received from the TCP client
 - `Target>$...` for packets received from the FTDI target
@@ -251,7 +258,7 @@ cmake -DNDEBUG=ON ..
 make
 ```
 
-In both debug and release builds, debug traces are controlled dynamically. Use the `--verbose` flag when running `ftx` to see these logs in your terminal. Building with `NDEBUG` will disable standard C++ assertions, but will no longer silence the logger.
+In both debug and release builds, debug traces are controlled dynamically. Use the `-v` or `-vv` flags when running `ftx` to see these logs in your terminal. Building with `NDEBUG` will disable standard C++ assertions, but will no longer silence the logger.
 
 ### Error Handling
 

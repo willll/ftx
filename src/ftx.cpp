@@ -73,6 +73,7 @@ const char* strsignal(int sig) {
 
 
 bool g_verbose = false;
+int g_verbose_level = 0;
 
 const int VID = 0x0403;
 const int PID = 0x6001;
@@ -110,12 +111,13 @@ void PrintUsage(const char* progName) {
     std::string prog = boost::filesystem::path(progName).filename().string();
     std::cout << "Usage: " << prog << " [-options] [-commands]\n\n";
     std::cout << "Options:\n";
-    std::cout << "  -v  <VID>                     Device VID (Default 0x0403)\n";
-    std::cout << "  -p  <PID>                     Device PID (Default 0x6001)\n";
+    std::cout << "  --vid <VID>                   Device VID (Default 0x0403)\n";
+    std::cout << "  --pid <PID>                   Device PID (Default 0x6001)\n";
     std::cout << "  -s  <Serial>                  Device Serial (Default : Will match VID and PID with an FTDI serial)\n";
     std::cout << "  -c                            Run debug console\n";
     std::cout << "  -g  [port]                    Run raw TCP<->FTDI proxy (Default port 1234)\n";
-    std::cout << "  -verbose                      Output all dbg, execution traces, and RSP packets\n";
+    std::cout << "  -v                            Output GDB commands\n";
+    std::cout << "  -vv                           Output GDB commands and all dbg execution traces\n";
     std::cout << "  -l                            List available FTDI devices\n";
     std::cout << "  -help                         Help\n\n";
     std::cout << "Commands:\n";
@@ -150,7 +152,7 @@ struct CommandLineArgs {
     bool console = false; ///< Run debug console
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
-    bool verbose = false; ///< Verbose proxy tracing
+    int verbose_level = 0; ///< Verbose tracing level (0=none, 1=GDB, 2=all)
     enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     std::string target; ///< Target path for copy operations
@@ -169,13 +171,15 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     CommandLineArgs args;
     po::options_description desc("Allowed options");
     desc.add_options()
-        ("v,v", po::value<std::string>(), "Device VID (hex) [optional]")
-        ("p,p", po::value<std::string>(), "Device PID (hex) [optional]")
+        ("vid", po::value<std::string>(), "Device VID (hex) [optional]")
+        ("pid", po::value<std::string>(), "Device PID (hex) [optional]")
         ("s,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
         ("l,l", "List available FTDI devices")
         ("c,c", "Run debug console")
         ("g,g", po::value<std::string>()->implicit_value("1234"), "Run raw TCP proxy [optional port]")
-        ("verbose", "Output all dbg, execution traces, and RSP packets")
+        ("verbose_level", po::value<int>(), "Verbose level")
+        ("v", "Output GDB commands")
+        ("vv", "Output GDB commands and dbg execution traces")
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
@@ -198,7 +202,11 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         for (int i = 0; i < argc; ++i) {
             std::string token = argv[i] ? argv[i] : "";
             if (token == "-verbose") {
-                token = "--verbose";
+                token = "--vv";
+            } else if (token == "-v") {
+                token = "--v";
+            } else if (token == "-vv") {
+                token = "--vv";
             } else if (token == "-help") {
                 token = "--help";
             } else if (token == "-ls") {
@@ -229,11 +237,11 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if (vm.count("v")) {
-        args.vid = std::stoi(vm["v"].as<std::string>(), nullptr, 16);
+    if (vm.count("vid")) {
+        args.vid = std::stoi(vm["vid"].as<std::string>(), nullptr, 16);
     }
-    if (vm.count("p")) {
-        args.pid = std::stoi(vm["p"].as<std::string>(), nullptr, 16);
+    if (vm.count("pid")) {
+        args.pid = std::stoi(vm["pid"].as<std::string>(), nullptr, 16);
     }
     if (vm.count("s")) {
         args.serial = vm["s"].as<std::string>();
@@ -278,8 +286,12 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
             args.tcp_port = 1234;
         }
     }
-    if (vm.count("verbose")) {
-        args.verbose = true;
+    if (vm.count("vv")) {
+        args.verbose_level = 2;
+    } else if (vm.count("v")) {
+        args.verbose_level = 1;
+    } else if (vm.count("verbose_level")) {
+        args.verbose_level = vm["verbose_level"].as<int>();
     }
     if (vm.count("d")) {
         auto vals = vm["d"].as<std::vector<std::string>>();
@@ -327,7 +339,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
 int main(int argc, char *argv[])
 {
     CommandLineArgs args = parse_args(argc, argv);
-    g_verbose = args.verbose;
+    g_verbose_level = args.verbose_level;
+    g_verbose = (g_verbose_level >= 2);
 
     if (args.command == CommandLineArgs::NONE && !args.console && !args.tcp_proxy) {
         PrintUsage(argv[0]);
@@ -405,7 +418,7 @@ int main(int argc, char *argv[])
         }
         
         if (args.tcp_proxy) {
-            return ftdi::DoTcpProxy(args.tcp_port, args.verbose);
+            return ftdi::DoTcpProxy(args.tcp_port, (g_verbose_level >= 1));
         }
         if (args.console) {
             ftdi::DoConsole();
