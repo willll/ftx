@@ -128,6 +128,8 @@ void PrintUsage(const char* progName) {
     std::cout << "  -dump  <file>                 Dump BIOS to file\n\n";
     std::cout << "  --ls <path>                   List files and directories\n";
     std::cout << "  --rm <path>                   Remove a file or empty directory\n";
+    std::cout << "  --mkdir <path>                Create a directory\n";
+    std::cout << "  --rmdir <path>                Delete a directory\n";
     std::cout << "  --cp <file> <target>          Copy a file to a raw SD range (sdraw:start:count) or FAT filesystem path (/path)\n";
     std::cout << "  --crc <file>                  Print CRC-8 for a file\n";
     std::cout << "  --lcrc <file>                 Print CRC-8 for a local host file\n\n";
@@ -153,7 +155,7 @@ struct CommandLineArgs {
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
     int verbose_level = 0; ///< Verbose tracing level (0=none, 1=GDB, 2=all)
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC, MKDIR, RMDIR } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     std::string target; ///< Target path for copy operations
     unsigned int address = 0; ///< Address for transfer/execute
@@ -186,6 +188,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("r,r", po::value<std::string>(), "Run: <address>")
         ("ls", po::value<std::string>()->implicit_value("/"), "List files and directories: <path>")
         ("rm", po::value<std::string>(), "Remove a file or empty directory: <path>")
+        ("mkdir", po::value<std::string>(), "Create a directory: <path>")
+        ("rmdir", po::value<std::string>(), "Delete a directory: <path>")
         ("cp", po::value<std::vector<std::string>>()->multitoken(), "Copy: <file> <sdraw:start:count>")
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
         ("lcrc", po::value<std::string>(), "Print CRC-8 for a local file: <file>")
@@ -213,6 +217,10 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
                 token = "--ls";
             } else if (token == "-rm") {
                 token = "--rm";
+            } else if (token == "-mkdir") {
+                token = "--mkdir";
+            } else if (token == "-rmdir") {
+                token = "--rmdir";
             } else if (token == "-cp") {
                 token = "--cp";
             } else if (token == "-crc") {
@@ -259,6 +267,12 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     } else if (vm.count("rm")) {
         args.command = CommandLineArgs::RM;
         args.filename = vm["rm"].as<std::string>();
+    } else if (vm.count("mkdir")) {
+        args.command = CommandLineArgs::MKDIR;
+        args.filename = vm["mkdir"].as<std::string>();
+    } else if (vm.count("rmdir")) {
+        args.command = CommandLineArgs::RMDIR;
+        args.filename = vm["rmdir"].as<std::string>();
     } else if (vm.count("cp")) {
         auto vals = vm["cp"].as<std::vector<std::string>>();
         if (vals.size() == 2) {
@@ -402,6 +416,12 @@ int main(int argc, char *argv[])
                 break;
             case CommandLineArgs::RM:
                 status = xfer::DoRemove(args.filename.c_str());
+                break;
+            case CommandLineArgs::MKDIR:
+                status = xfer::DoMkdir(args.filename.c_str());
+                break;
+            case CommandLineArgs::RMDIR:
+                status = xfer::DoRmdir(args.filename.c_str());
                 break;
             case CommandLineArgs::CP:
                 status = xfer::DoSdUpload(args.filename.c_str(), args.target.c_str());

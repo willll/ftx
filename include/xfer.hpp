@@ -92,6 +92,20 @@ int DoList(const char *path);
 int DoRemove(const char *path);
 
 /**
+ * @brief Create a directory.
+ * @param path Directory path to create.
+ * @return 1 on success, 0 on error.
+ */
+int DoMkdir(const char *path);
+
+/**
+ * @brief Delete a directory.
+ * @param path Directory path to delete.
+ * @return 1 on success, 0 on error.
+ */
+int DoRmdir(const char *path);
+
+/**
  * @brief Compute and print the CRC-8 of a file.
  * @param filename Input file name.
  * @return 1 on success, 0 on error.

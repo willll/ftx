@@ -60,7 +60,9 @@ namespace xfer
       LIST = 1,
       REMOVE = 2,
       CRC = 3,
-      UPLOAD = 4
+      UPLOAD = 4,
+      MKDIR = 5,
+      RMDIR = 6
     };
 
     enum class RemoteIoStatus : uint8_t
@@ -457,6 +459,16 @@ namespace xfer
   int DoRemove(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::REMOVE, path, "DoRemove");
+  }
+
+  int DoMkdir(const char *path)
+  {
+    return ExecuteRemoteIoCommand(RemoteIoCommand::MKDIR, path, "DoMkdir");
+  }
+
+  int DoRmdir(const char *path)
+  {
+    return ExecuteRemoteIoCommand(RemoteIoCommand::RMDIR, path, "DoRmdir");
   }
 
   int DoCrc(const char *filename)
