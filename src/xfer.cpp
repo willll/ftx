@@ -587,6 +587,9 @@ namespace xfer
     return status < 0 ? 0 : 1;
   }
 
+  /**
+   * @copydoc xfer::DoUpload
+   */
   int DoUpload(const char *filename, uint32_t address, const bool execute)
   {
     // Step 1: Determine function name based on execution flag

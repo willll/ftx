@@ -249,6 +249,9 @@ void trace_rsp_stream(const char* prefix, std::string& carry, const unsigned cha
 
 namespace ftdi {
 
+/**
+ * @copydoc ftdi::DoTcpProxy
+ */
 int DoTcpProxy(uint16_t port, bool verbose)
 {
     cdbg << "[TCPProxy][dbg] start port=" << port << " verbose=" << verbose << std::endl;
