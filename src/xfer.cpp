@@ -485,105 +485,91 @@ namespace xfer
    */
   int DoDownload(const char *filename, uint32_t address, std::size_t size)
   {
-    // Step 1: Log the start of the download process with file, address, and size
-    // details
     cdbg << "[DoDownload] Starting download: file='" << filename
               << "', address=0x" << std::hex << address << ", size=" << std::dec
               << size << std::endl;
-    // Step 2: Allocate a buffer to store the downloaded data
+
+    // Allocate a memory buffer to hold the downloaded payload
     std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[size]);
     FILE *File = nullptr;
     std::size_t received = 0;
     int status = -1;
     crc8::crc_t readChecksum = 0, calcChecksum = 0;
-    // Step 3: Record the start time for performance measurement
+    
     auto before = std::chrono::steady_clock::now();
-    // Step 4: Log sending of the download command
+
     cdbg << "[DoDownload] Sending download command..." << std::endl;
-    // Step 5: Send the download command to the device
+    // Issue the download command to the device requesting data from the specified address
     status =
         xfer::SendCommandWithAddressAndLength(USBDC_FUNC_DOWNLOAD, address, size);
     if (status < 0)
     {
-      // Step 6: Handle error if the download command fails
       std::cerr << "[DoDownload] Send download command error: "
                 << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
 
-    // Step 7: Log the start of data reading from the device
     cdbg << "[DoDownload] Reading data from device..." << std::endl;
-    // Step 8: Read data from the device until all requested bytes are received
+    // Read the requested payload from the device in chunks
     while (size - received > 0 && !ftdi::g_interrupt_flag)
     {
       status = ftdi_read_data(&ftdi::g_Device, &pFileBuffer[received],
                               size - received);
       if (status < 0)
       {
-        // Step 9: Handle error if reading data fails
         std::cerr << "[DoDownload] Read data error: "
                   << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
       received += status;
-      // Step 10: Log progress of received bytes
       cdbg << "[DoDownload] Received " << received << "/" << size
                 << " bytes..." << std::endl;
     }
 
-    // Step 11: Log waiting for the checksum byte
     cdbg << "[DoDownload] Waiting for checksum byte..." << std::endl;
-    // Step 12: Read the checksum byte, looping until received or an error occurs
+    // Await the device's CRC checksum for integrity verification
     do
     {
       status = ftdi_read_data(
           &ftdi::g_Device, reinterpret_cast<unsigned char *>(&readChecksum), 1);
       if (status < 0)
       {
-        // Step 13: Handle error if reading checksum fails
         std::cerr << "[DoDownload] Read data error: "
                   << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
     } while (status == 0 && !ftdi::g_interrupt_flag);
 
-    // Step 14: Record the end time for performance measurement
     auto after = std::chrono::steady_clock::now();
-    // Step 15: Log and calculate performance metrics
     cdbg << "[DoDownload] Data received. Calculating performance..."
               << std::endl;
     xfer::ReportPerformance(before, after, size);
 
-    // Step 16: Log and calculate the CRC checksum of the received data
     cdbg << "[DoDownload] Calculating CRC..." << std::endl;
+    // Verify that the data received locally matches what the device sent
     calcChecksum = crc8::crc_update(calcChecksum, pFileBuffer.get(), size);
 
-    // Step 17: Verify the calculated checksum against the received checksum
     if (readChecksum != calcChecksum)
     {
-      // Step 18: Handle checksum mismatch error
       std::cerr << "[DoDownload] Checksum error (" << std::hex
                 << static_cast<int>(calcChecksum) << ", should be "
                 << static_cast<int>(readChecksum) << ")" << std::endl;
       return 0;
     }
 
-    // Step 19: Log and open the output file for writing
     cdbg << "[DoDownload] Writing to file..." << std::endl;
+    // Write out the verified buffer to the destination binary file
     File = fopen(filename, "wb");
     if (File == nullptr)
     {
-      // Step 20: Handle error if file creation fails
       std::cerr << "[DoDownload] Error creating output file" << std::endl;
       return 0;
     }
-    // Step 21: Write the received data to the file
+    
     fwrite(pFileBuffer.get(), 1, size, File);
-    // Step 22: Close the file
     fclose(File);
-    // Step 23: Log successful completion
+    
     cdbg << "[DoDownload] Download complete." << std::endl;
-    // Step 24: Return success or failure based on status
     return status < 0 ? 0 : 1;
   }
 
@@ -592,55 +578,49 @@ namespace xfer
    */
   int DoUpload(const char *filename, uint32_t address, const bool execute)
   {
-    // Step 1: Determine function name based on execution flag
+    // Adjust logging prefix based on whether this upload also triggers execution
     std::string functnName = execute ? "DoUploadExecute" : "DoUpload";
 
-    // Step 2: Log the start of the upload process
     cdbg << "[" << functnName << "] Starting upload: file='" << filename
               << "', address=0x" << std::hex << address << std::dec << std::endl;
-    // Step 3: Open the input file for reading
+
+    // Open and validate the input binary file
     FILE *File = fopen(filename, "rb");
     if (!File)
     {
-      // Step 4: Handle error if file cannot be opened
       std::cerr << "[" << functnName << "] Can't open the file '" << filename
                 << "'" << std::endl;
       return 0;
     }
 
-    // Step 5: Get the file size
     fseek(File, 0, SEEK_END);
     long size = ftell(File);
     fseek(File, 0, SEEK_SET);
     if (size <= 0)
     {
-      // Step 6: Handle error if file is empty or size cannot be determined
       std::cerr << "[" << functnName << "] File is empty or error reading size."
                 << std::endl;
       fclose(File);
       return 0;
     }
 
-    // Step 7: Allocate a buffer for the file data
+    // Read the entire file into a contiguous memory buffer
     std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[size]);
-    // Step 8: Read the file data into the buffer
     if (fread(pFileBuffer.get(), 1, size, File) != static_cast<size_t>(size))
     {
-      // Step 9: Handle error if file read fails
       std::cerr << "[" << functnName << "] File read error" << std::endl;
       fclose(File);
       return 0;
     }
-    // Step 10: Close the file
     fclose(File);
 
-    // Step 11: Calculate the CRC checksum of the file data
-    crc8::crc_t checksum = crc8::crc_update(checksum, pFileBuffer.get(), size);
+    // Compute a CRC-8 checksum over the payload for data integrity verification
+    crc8::crc_t checksum = crc8::crc_update(0, pFileBuffer.get(), size);
 
-    // Step 12: Record the start time for performance measurement
+    // Record transfer start time for bandwidth calculation
     auto before = std::chrono::steady_clock::now();
 
-    // Step 13: Set the command based on whether execution is requested
+    // Issue the appropriate upload command to the device along with the target memory address
     if (execute)
     {
       cdbg << "[" << functnName << "] Uploading and executing at address 0x"
@@ -653,59 +633,53 @@ namespace xfer
                 << address << std::dec << std::endl;
       SendBuf[0] = USBDC_FUNC_UPLOAD;
     }
-    // Step 14: Send the upload command to the device
+
     int status = xfer::SendCommandWithAddressAndLength(SendBuf[0], address, size);
     if (status < 0)
     {
-      // Step 15: Handle error if sending the upload command fails
       std::cerr << "[" << functnName << "] Send upload command error: "
                 << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
 
-    // Step 16: Send the file data to the device in chunks
+    // Stream the payload to the device in chunks
     unsigned int sent = 0;
     while (size - sent > 0 && !ftdi::g_interrupt_flag)
     {
       status = ftdi_write_data(&ftdi::g_Device, &pFileBuffer[sent], size - sent);
       if (status < 0)
       {
-        // Step 17: Handle error if sending data fails
         std::cerr << "[" << functnName << "] Send data error: "
                   << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
       sent += status;
-      // Step 18: Log progress of sent bytes
       cdbg << "[" << functnName << "] Sent " << sent << "/" << size
                 << " bytes..." << std::endl;
     }
 
-    // Step 19: Send the checksum to the device
+    // Send the calculated CRC checksum to the device so it can verify the integrity of the upload
     SendBuf[0] = static_cast<unsigned char>(checksum);
     status = ftdi_write_data(&ftdi::g_Device, SendBuf, 1);
     if (status < 0)
     {
-      // Step 20: Handle error if sending checksum fails
       std::cerr << "[" << functnName << "] Send checksum error: "
                 << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
 
-    // Step 21: Wait for the device to report the upload result
+    // Await the device's acknowledgment of the payload and CRC check
     do
     {
       status = ftdi_read_data(&ftdi::g_Device, RecvBuf, 1);
       if (status < 0)
       {
-        // Step 22: Handle error if reading upload result fails
         std::cerr << "[" << functnName << "] Read upload result failed: "
                   << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
     } while (status == 0 && !ftdi::g_interrupt_flag);
 
-    // Step 23: Check if the device reported an upload error
     if (RecvBuf[0] != 0)
     {
       std::cerr << "[" << functnName << "] Device reported upload error."
@@ -713,13 +687,10 @@ namespace xfer
       return 0;
     }
 
-    // Step 24: Record the end time and calculate performance
     auto after = std::chrono::steady_clock::now();
     xfer::ReportPerformance(before, after, size);
-    // Step 25: Log successful completion
     cdbg << "[" << functnName << "] Upload complete." << std::endl;
 
-    // Step 26: Return success
     return 1;
   }
 
@@ -730,28 +701,25 @@ namespace xfer
    */
   int DoRun(uint32_t address)
   {
-    // Step 1: Log the execution attempt at the specified address
     cdbg << "[DoRun] Executing at address 0x" << std::hex << address
               << std::dec << std::endl;
-    // Step 2: Set the execute command in the send buffer
+
+    // Issue the standard execution command followed by the 4-byte big-endian address
     SendBuf[0] = USBDC_FUNC_EXEC;
-    // Step 3: Extract and store the address bytes in big-endian order
     SendBuf[1] = static_cast<unsigned char>(address >> 24);
     SendBuf[2] = static_cast<unsigned char>(address >> 16);
     SendBuf[3] = static_cast<unsigned char>(address >> 8);
     SendBuf[4] = static_cast<unsigned char>(address);
-    // Step 4: Send the execute command to the device
+
     int status = ftdi_write_data(&ftdi::g_Device, SendBuf, 5);
     if (status < 0)
     {
-      // Step 5: Handle error if sending the execute command fails
       std::cerr << "[DoRun] Send execute error: "
                 << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
-    // Step 6: Log successful command send
+    
     cdbg << "[DoRun] Execute command sent successfully." << std::endl;
-    // Step 7: Return success
     return 1;
   }
 
@@ -763,23 +731,20 @@ namespace xfer
    */
   int DoExecute(const char *filename, uint32_t address)
   {
-    // Step 1: Log the start of the upload and execute process
     cdbg << "[DoExecute] Uploading and executing: file='" << filename
               << "', address=0x" << std::hex << address << std::dec << std::endl;
-    int status = 0;
-    // Step 2: Call DoUpload with execute flag set to true
+
+    // Delegate to DoUpload with the execute flag enabled, and return its status
     if (DoUpload(filename, address, true))
     {
-      // Step 3: Log successful upload
       cdbg << "[DoExecute] Upload successful. Executing..." << std::endl;
+      return 1;
     }
     else
     {
-      // Step 4: Handle error if upload fails
       std::cerr << "[DoExecute] Upload failed. Execution aborted." << std::endl;
+      return 0;
     }
-    // Step 5: Return status (currently always 0 due to uninitialized status)
-    return status;
   }
 
   int DoSdUpload(const char *host_filename, const char *saturn_sd_path)
