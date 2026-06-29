@@ -35,7 +35,6 @@ ALIASES                = "author=@par Author:" \
                          "license=@par License:"
 
 WARN_IF_UNDOCUMENTED   = YES
-WARN_IF_DOC_LACKED     = YES
 
 JAVADOC_AUTOBRIEF      = YES
 QT_AUTOBRIEF           = YES
@@ -64,6 +63,3 @@ INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = NDEBUG \
                          FTX_DEBUG_BUILD
 
-MAX_INITIALIZERS       = 30
-
-MIAMEL_SEARCH          = NO

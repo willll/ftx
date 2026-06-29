@@ -53,16 +53,6 @@ static const crc_t crc_table[256] = {
     0xde, 0xd9, 0xd0, 0xd7, 0xc2, 0xc5, 0xcc, 0xcb, 0xe6, 0xe1, 0xe8, 0xef, 0xfa, 0xfd, 0xf4, 0xf3
 };
 
-/**
- * @brief Update CRC-8 value with a block of data.
- *
- * Uses a precomputed lookup table for efficiency.
- *
- * @param crc Current CRC value.
- * @param data Pointer to data buffer.
- * @param data_len Number of bytes in data buffer.
- * @return Updated CRC value.
- */
 crc_t crc_update(crc_t crc, const unsigned char* data, std::size_t data_len) noexcept {
     unsigned int tbl_idx;
     while (data_len--) {

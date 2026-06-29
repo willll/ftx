@@ -370,8 +370,8 @@ namespace xfer
 
   /**
    * @brief Print transfer performance statistics.
-   * @param pStartTime Start time of transfer.
-   * @param pEndTime End time of transfer.
+   * @param start Start time of transfer.
+   * @param end End time of transfer.
    * @param size Number of bytes transferred.
    */
   void ReportPerformance(const std::chrono::steady_clock::time_point &start,
@@ -587,12 +587,6 @@ namespace xfer
     return status < 0 ? 0 : 1;
   }
 
-  /**
-   * @brief Upload data from file to device.
-   * @param filename Input file name.
-   * @param address Device address to write to.
-   * @return 1 on success, 0 on error.
-   */
   int DoUpload(const char *filename, uint32_t address, const bool execute)
   {
     // Step 1: Determine function name based on execution flag

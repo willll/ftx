@@ -249,46 +249,6 @@ void trace_rsp_stream(const char* prefix, std::string& carry, const unsigned cha
 
 namespace ftdi {
 
-/**
- * @brief Start a raw TCP↔FTDI proxy server.
- *
- * Establishes a TCP listening socket on localhost and forwards all bytes
- * between connected clients and the FTDI device in both directions.
- * Acts as a transparent byte bridge with no protocol-specific interpretation.
- *
- * **Server Behavior**:
- * - Listens on `127.0.0.1:port` (loopback only for security)
- * - Accepts one client at a time
- * - Forwards TCP→FTDI and FTDI→TCP bidirectionally
- * - Automatic reconnect loop (waits for next client after disconnect)
- * - Stops on `g_interrupt_flag` or fatal socket error
- *
- * **Polling Timeouts**:
- * - Accept poll: 250ms (allows checking g_interrupt_flag frequently)
- * - Client poll: 10ms (low latency for bidirectional forwarding)
- *
- * **Error Handling**:
- * - EINTR (interrupted system calls): Automatically retried
- * - Socket errors: Logged to stderr, client disconnected
- * - FTDI write failures: Handled by `write_all_ftdi()` with retry logic
- *
- * **Tracing** (with `verbose=true`):
- * - RSP command packets prefixed with `GDB>` or `Target>`
- * - Byte counts for each successful forward operation
- * - Connection lifecycle events
- *
- * @param[in] port TCP port to listen on (default: 1234).
- * @param[in] verbose If true, prints traced RSP packets to stdout.
- * @return Exit status (0 on clean shutdown, 1 on error).
- *
- * @note This function blocks until `g_interrupt_flag` is set (typically via signal).
- * @note Requires FTDI device to be initialized via `InitComms()` before calling.
- * @note All debug output goes to stdout/stderr; no return value indicates byte counts.
- *
- * @see write_all_socket() for TCP write details.
- * @see write_all_ftdi() for adaptive FTDI write strategy.
- * @see trace_rsp_stream() for packet tracing format.
- */
 int DoTcpProxy(uint16_t port, bool verbose)
 {
     cdbg << "[TCPProxy][dbg] start port=" << port << " verbose=" << verbose << std::endl;

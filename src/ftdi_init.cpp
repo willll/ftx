@@ -35,12 +35,6 @@
 
 namespace ftdi {
 
-/**
- * @brief Initialize FTDI device communication.
- * @param VID USB Vendor ID.
- * @param PID USB Product ID.
- * @return 1 on success, 0 on error.
- */
 int InitComms(int VID, int PID, const std::string &Serial, bool recover)
 {
     CDBG_LOG_ON_CHANGE("InitComms.begin",
@@ -202,9 +196,6 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
     return !error;
 }
 
-/**
- * @brief Close FTDI device communication and purge buffers.
- */
 void CloseComms()
 {
     // Step 1: Log the start of the device closing process
