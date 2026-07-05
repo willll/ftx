@@ -393,6 +393,9 @@ namespace xfer
               << speed_kb_s << " KB/s" << std::endl;
   }
 
+  /**
+   * @copydoc xfer::DoBiosDump
+   */
   int DoBiosDump(const char *filename)
   {
     // Step 1: Log the start of the BIOS dump process
@@ -402,6 +405,9 @@ namespace xfer
     return DoDownload(filename, saturn::bios_address, saturn::bios_size);
   }
 
+  /**
+   * @copydoc xfer::DoList
+   */
   int DoList(const char *path)
   {
     if (!SendRemoteIoCommand(RemoteIoCommand::LIST, path))
@@ -456,32 +462,40 @@ namespace xfer
     }
   }
 
+  /**
+   * @copydoc xfer::DoRemove
+   */
   int DoRemove(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::REMOVE, path, "DoRemove");
   }
 
+  /**
+   * @copydoc xfer::DoMkdir
+   */
   int DoMkdir(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::MKDIR, path, "DoMkdir");
   }
 
+  /**
+   * @copydoc xfer::DoRmdir
+   */
   int DoRmdir(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::RMDIR, path, "DoRmdir");
   }
 
+  /**
+   * @copydoc xfer::DoCrc
+   */
   int DoCrc(const char *filename)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::CRC, filename, "DoCrc");
   }
 
   /**
-   * @brief Download data from device and write to file.
-   * @param filename Output file name.
-   * @param address Device address to read from.
-   * @param size Number of bytes to download.
-   * @return 1 on success, 0 on error.
+   * @copydoc xfer::DoDownload
    */
   int DoDownload(const char *filename, uint32_t address, std::size_t size)
   {
@@ -695,9 +709,7 @@ namespace xfer
   }
 
   /**
-   * @brief Send execute command to device at given address.
-   * @param address Address to execute.
-   * @return 1 on success, 0 on error.
+   * @copydoc xfer::DoRun
    */
   int DoRun(uint32_t address)
   {
@@ -724,10 +736,7 @@ namespace xfer
   }
 
   /**
-   * @brief Upload file to device and execute at given address.
-   * @param filename Input file name.
-   * @param address Address to execute.
-   * @return 1 on success, 0 on error.
+   * @copydoc xfer::DoExecute
    */
   int DoExecute(const char *filename, uint32_t address)
   {
@@ -747,6 +756,9 @@ namespace xfer
     }
   }
 
+  /**
+   * @copydoc xfer::DoSdUpload
+   */
   int DoSdUpload(const char *host_filename, const char *saturn_sd_path)
   {
     if (saturn_sd_path != nullptr && saturn_sd_path[0] == '/')
