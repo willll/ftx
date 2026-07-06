@@ -29,11 +29,13 @@
 
 #include <ftdi.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -324,6 +326,29 @@ namespace xfer
                 << static_cast<int>(reply.status) << std::endl;
       return 0;
     }
+
+    template <typename WriteFunc>
+    bool StreamAndCrc(FILE* f, crc8::crc_t& checksum_out, WriteFunc write_func)
+    {
+      unsigned char buffer[4096];
+      crc8::crc_t checksum = 0;
+      size_t bytes_read;
+      while ((bytes_read = fread(buffer, 1, sizeof(buffer), f)) > 0)
+      {
+        if (!write_func(buffer, bytes_read))
+        {
+          return false;
+        }
+        checksum = crc8::crc_update(checksum, buffer, bytes_read);
+      }
+      if (ferror(f))
+      {
+        std::cerr << "[DoSdUpload] File read error." << std::endl;
+        return false;
+      }
+      checksum_out = checksum;
+      return true;
+    }
   }
 
   unsigned char SendBuf[2 * WRITE_PAYLOAD_SIZE];
@@ -500,68 +525,68 @@ namespace xfer
   int DoDownload(const char *filename, uint32_t address, std::size_t size)
   {
     cdbg << "[DoDownload] Starting download: file='" << filename
-              << "', address=0x" << std::hex << address << ", size=" << std::dec
-              << size << std::endl;
+         << "', address=0x" << std::hex << address << ", size=" << std::dec << size << std::endl;
 
-    // Allocate a memory buffer to hold the downloaded payload
-    std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[size]);
-    FILE *File = nullptr;
-    std::size_t received = 0;
+    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(filename, "wb"), &fclose);
+    if (!file)
+    {
+      std::cerr << "[DoDownload] Error creating output file" << std::endl;
+      return 0;
+    }
+
     int status = -1;
     crc8::crc_t readChecksum = 0, calcChecksum = 0;
     
     auto before = std::chrono::steady_clock::now();
 
     cdbg << "[DoDownload] Sending download command..." << std::endl;
-    // Issue the download command to the device requesting data from the specified address
-    status =
-        xfer::SendCommandWithAddressAndLength(USBDC_FUNC_DOWNLOAD, address, size);
+    status = xfer::SendCommandWithAddressAndLength(USBDC_FUNC_DOWNLOAD, address, size);
     if (status < 0)
     {
-      std::cerr << "[DoDownload] Send download command error: "
-                << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+      std::cerr << "[DoDownload] Send download command error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
 
     cdbg << "[DoDownload] Reading data from device..." << std::endl;
-    // Read the requested payload from the device in chunks
+    
+    unsigned char buffer[4096];
+    std::size_t received = 0;
     while (size - received > 0 && !ftdi::g_interrupt_flag)
     {
-      status = ftdi_read_data(&ftdi::g_Device, &pFileBuffer[received],
-                              size - received);
+      size_t to_read = std::min<size_t>(sizeof(buffer), size - received);
+      status = ftdi_read_data(&ftdi::g_Device, buffer, to_read);
       if (status < 0)
       {
-        std::cerr << "[DoDownload] Read data error: "
-                  << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+        std::cerr << "[DoDownload] Read data error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
-      received += status;
-      cdbg << "[DoDownload] Received " << received << "/" << size
-                << " bytes..." << std::endl;
+      if (status > 0)
+      {
+        if (fwrite(buffer, 1, status, file.get()) != static_cast<size_t>(status))
+        {
+          std::cerr << "[DoDownload] File write error" << std::endl;
+          return 0;
+        }
+        calcChecksum = crc8::crc_update(calcChecksum, buffer, status);
+        received += status;
+        cdbg << "[DoDownload] Received " << received << "/" << size << " bytes..." << std::endl;
+      }
     }
 
     cdbg << "[DoDownload] Waiting for checksum byte..." << std::endl;
-    // Await the device's CRC checksum for integrity verification
     do
     {
-      status = ftdi_read_data(
-          &ftdi::g_Device, reinterpret_cast<unsigned char *>(&readChecksum), 1);
+      status = ftdi_read_data(&ftdi::g_Device, reinterpret_cast<unsigned char *>(&readChecksum), 1);
       if (status < 0)
       {
-        std::cerr << "[DoDownload] Read data error: "
-                  << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+        std::cerr << "[DoDownload] Read data error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
     } while (status == 0 && !ftdi::g_interrupt_flag);
 
     auto after = std::chrono::steady_clock::now();
-    cdbg << "[DoDownload] Data received. Calculating performance..."
-              << std::endl;
+    cdbg << "[DoDownload] Data received. Calculating performance..." << std::endl;
     xfer::ReportPerformance(before, after, size);
-
-    cdbg << "[DoDownload] Calculating CRC..." << std::endl;
-    // Verify that the data received locally matches what the device sent
-    calcChecksum = crc8::crc_update(calcChecksum, pFileBuffer.get(), size);
 
     if (readChecksum != calcChecksum)
     {
@@ -571,20 +596,8 @@ namespace xfer
       return 0;
     }
 
-    cdbg << "[DoDownload] Writing to file..." << std::endl;
-    // Write out the verified buffer to the destination binary file
-    File = fopen(filename, "wb");
-    if (File == nullptr)
-    {
-      std::cerr << "[DoDownload] Error creating output file" << std::endl;
-      return 0;
-    }
-    
-    fwrite(pFileBuffer.get(), 1, size, File);
-    fclose(File);
-    
     cdbg << "[DoDownload] Download complete." << std::endl;
-    return status < 0 ? 0 : 1;
+    return 1;
   }
 
   /**
@@ -592,119 +605,100 @@ namespace xfer
    */
   int DoUpload(const char *filename, uint32_t address, const bool execute)
   {
-    // Adjust logging prefix based on whether this upload also triggers execution
     std::string functnName = execute ? "DoUploadExecute" : "DoUpload";
-
     cdbg << "[" << functnName << "] Starting upload: file='" << filename
-              << "', address=0x" << std::hex << address << std::dec << std::endl;
+         << "', address=0x" << std::hex << address << std::dec << std::endl;
 
-    // Open and validate the input binary file
-    FILE *File = fopen(filename, "rb");
-    if (!File)
+    std::error_code ec;
+    uintmax_t file_size_raw = std::filesystem::file_size(filename, ec);
+    if (ec || file_size_raw == 0)
     {
-      std::cerr << "[" << functnName << "] Can't open the file '" << filename
-                << "'" << std::endl;
+      std::cerr << "[" << functnName << "] File is empty or error reading size: " << ec.message() << std::endl;
+      return 0;
+    }
+    
+    if (file_size_raw > std::numeric_limits<uint32_t>::max())
+    {
+      std::cerr << "[" << functnName << "] File is too large for 32-bit address space." << std::endl;
+      return 0;
+    }
+    const uint32_t size = static_cast<uint32_t>(file_size_raw);
+
+    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(filename, "rb"), &fclose);
+    if (!file)
+    {
+      std::cerr << "[" << functnName << "] Can't open the file '" << filename << "'" << std::endl;
       return 0;
     }
 
-    fseek(File, 0, SEEK_END);
-    long size = ftell(File);
-    fseek(File, 0, SEEK_SET);
-    if (size <= 0)
-    {
-      std::cerr << "[" << functnName << "] File is empty or error reading size."
-                << std::endl;
-      fclose(File);
-      return 0;
-    }
-
-    // Read the entire file into a contiguous memory buffer
-    std::unique_ptr<unsigned char[]> pFileBuffer(new unsigned char[size]);
-    if (fread(pFileBuffer.get(), 1, size, File) != static_cast<size_t>(size))
-    {
-      std::cerr << "[" << functnName << "] File read error" << std::endl;
-      fclose(File);
-      return 0;
-    }
-    fclose(File);
-
-    // Compute a CRC-8 checksum over the payload for data integrity verification
-    crc8::crc_t checksum = crc8::crc_update(0, pFileBuffer.get(), size);
-
-    // Record transfer start time for bandwidth calculation
     auto before = std::chrono::steady_clock::now();
 
-    // Issue the appropriate upload command to the device along with the target memory address
     if (execute)
     {
-      cdbg << "[" << functnName << "] Uploading and executing at address 0x"
-                << std::hex << address << std::dec << std::endl;
+      cdbg << "[" << functnName << "] Uploading and executing at address 0x" << std::hex << address << std::dec << std::endl;
       SendBuf[0] = USBDC_FUNC_EXEC_EXT;
     }
     else
     {
-      cdbg << "[" << functnName << "] Uploading to address 0x" << std::hex
-                << address << std::dec << std::endl;
+      cdbg << "[" << functnName << "] Uploading to address 0x" << std::hex << address << std::dec << std::endl;
       SendBuf[0] = USBDC_FUNC_UPLOAD;
     }
 
     int status = xfer::SendCommandWithAddressAndLength(SendBuf[0], address, size);
     if (status < 0)
     {
-      std::cerr << "[" << functnName << "] Send upload command error: "
-                << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+      std::cerr << "[" << functnName << "] Send upload command error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
 
-    // Stream the payload to the device in chunks
-    unsigned int sent = 0;
-    while (size - sent > 0 && !ftdi::g_interrupt_flag)
+    crc8::crc_t checksum = 0;
+    if (!StreamAndCrc(file.get(), checksum, [&](const unsigned char* data, size_t len) {
+        size_t sent = 0;
+        while (sent < len && !ftdi::g_interrupt_flag)
+        {
+          int write_status = ftdi_write_data(&ftdi::g_Device, const_cast<unsigned char*>(data + sent), len - sent);
+          if (write_status < 0)
+          {
+            std::cerr << "[" << functnName << "] Send data error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+            return false;
+          }
+          if (write_status == 0) continue;
+          sent += write_status;
+          cdbg << "[" << functnName << "] Sent chunk..." << std::endl;
+        }
+        return true;
+    }))
     {
-      status = ftdi_write_data(&ftdi::g_Device, &pFileBuffer[sent], size - sent);
-      if (status < 0)
-      {
-        std::cerr << "[" << functnName << "] Send data error: "
-                  << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
-      }
-      sent += status;
-      cdbg << "[" << functnName << "] Sent " << sent << "/" << size
-                << " bytes..." << std::endl;
     }
 
-    // Send the calculated CRC checksum to the device so it can verify the integrity of the upload
     SendBuf[0] = static_cast<unsigned char>(checksum);
     status = ftdi_write_data(&ftdi::g_Device, SendBuf, 1);
     if (status < 0)
     {
-      std::cerr << "[" << functnName << "] Send checksum error: "
-                << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+      std::cerr << "[" << functnName << "] Send checksum error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
       return 0;
     }
 
-    // Await the device's acknowledgment of the payload and CRC check
     do
     {
       status = ftdi_read_data(&ftdi::g_Device, RecvBuf, 1);
       if (status < 0)
       {
-        std::cerr << "[" << functnName << "] Read upload result failed: "
-                  << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
+        std::cerr << "[" << functnName << "] Read upload result failed: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
         return 0;
       }
     } while (status == 0 && !ftdi::g_interrupt_flag);
 
     if (RecvBuf[0] != 0)
     {
-      std::cerr << "[" << functnName << "] Device reported upload error."
-                << std::endl;
+      std::cerr << "[" << functnName << "] Device reported upload error." << std::endl;
       return 0;
     }
 
     auto after = std::chrono::steady_clock::now();
     xfer::ReportPerformance(before, after, size);
     cdbg << "[" << functnName << "] Upload complete." << std::endl;
-
     return 1;
   }
 
@@ -761,6 +755,27 @@ namespace xfer
    */
   int DoSdUpload(const char *host_filename, const char *saturn_sd_path)
   {
+    std::error_code ec;
+    uintmax_t file_size_raw = std::filesystem::file_size(host_filename, ec);
+    if (ec || file_size_raw == 0)
+    {
+      std::cerr << "[DoSdUpload] Failed to determine file size: " << ec.message() << std::endl;
+      return 0;
+    }
+    if (file_size_raw > std::numeric_limits<uint32_t>::max())
+    {
+      std::cerr << "[DoSdUpload] File is too large." << std::endl;
+      return 0;
+    }
+    const uint32_t file_size = static_cast<uint32_t>(file_size_raw);
+
+    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(host_filename, "rb"), &fclose);
+    if (!file)
+    {
+      std::cerr << "[DoSdUpload] Can't open file '" << host_filename << "'" << std::endl;
+      return 0;
+    }
+
     if (saturn_sd_path != nullptr && saturn_sd_path[0] == '/')
     {
       if (!SendRemoteIoCommand(RemoteIoCommand::UPLOAD, saturn_sd_path))
@@ -781,25 +796,6 @@ namespace xfer
         return 0;
       }
 
-      FILE *file = fopen(host_filename, "rb");
-      if (!file)
-      {
-        std::cerr << "[DoSdUpload] Can't open file '" << host_filename << "'" << std::endl;
-        return 0;
-      }
-
-      fseek(file, 0, SEEK_END);
-      const long file_size_long = ftell(file);
-      fseek(file, 0, SEEK_SET);
-      if (file_size_long < 0)
-      {
-        std::cerr << "[DoSdUpload] Failed to determine file size." << std::endl;
-        fclose(file);
-        return 0;
-      }
-
-      const uint32_t file_size = static_cast<uint32_t>(file_size_long);
-
       const unsigned char size_buf[4] = {
           static_cast<unsigned char>(file_size >> 24),
           static_cast<unsigned char>(file_size >> 16),
@@ -807,24 +803,16 @@ namespace xfer
           static_cast<unsigned char>(file_size)};
       if (!WriteAllToDevice(size_buf, 4))
       {
-        fclose(file);
         return 0;
       }
 
-      unsigned char buffer[4096];
       crc8::crc_t checksum = 0;
-      size_t bytes_read;
-      while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0)
+      if (!StreamAndCrc(file.get(), checksum, [](const unsigned char* data, size_t len) {
+            return WriteAllToDevice(data, len);
+          }))
       {
-        if (!WriteAllToDevice(buffer, bytes_read))
-        {
-          fclose(file);
-          return 0;
-        }
-        checksum = crc8::crc_update(checksum, buffer, bytes_read);
+        return 0;
       }
-
-      fclose(file);
 
       if (!WriteAllToDevice(&checksum, 1))
       {
@@ -905,27 +893,6 @@ namespace xfer
     const uint32_t filename_len =
         static_cast<uint32_t>(std::strlen(filename_for_display));
 
-    FILE *file = fopen(host_filename, "rb");
-    if (!file)
-    {
-      std::cerr << "[DoSdUpload] Can't open file '" << host_filename << "'"
-                << std::endl;
-      return 0;
-    }
-
-    // Get File Size
-    fseek(file, 0, SEEK_END);
-    const long file_size_long = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    if (file_size_long < 0)
-    {
-      std::cerr << "[DoSdUpload] Failed to determine file size." << std::endl;
-      fclose(file);
-      return 0;
-    }
-
-    const uint32_t file_size = static_cast<uint32_t>(file_size_long);
-
     if (target.has_range)
     {
       const uint64_t max_bytes = static_cast<uint64_t>(target.sector_count) *
@@ -935,7 +902,6 @@ namespace xfer
         std::cerr << "[DoSdUpload] File is too large for target range '"
                   << saturn_sd_path << "' (" << file_size << " bytes > "
                   << max_bytes << " bytes)." << std::endl;
-        fclose(file);
         return 0;
       }
     }
@@ -944,7 +910,6 @@ namespace xfer
     unsigned char cmd = 0x10;
     if (!write_all(&cmd, 1, "Command"))
     {
-      fclose(file);
       return 0;
     }
 
@@ -956,7 +921,6 @@ namespace xfer
         static_cast<unsigned char>(filename_len)};
     if (!write_all(filename_len_buf, 4, "Filename length"))
     {
-      fclose(file);
       return 0;
     }
 
@@ -965,7 +929,6 @@ namespace xfer
         !write_all(reinterpret_cast<const unsigned char *>(filename_for_display),
                    filename_len, "Filename"))
     {
-      fclose(file);
       return 0;
     }
 
@@ -977,7 +940,6 @@ namespace xfer
       static_cast<unsigned char>(target.start_sector)};
     if (!write_all(sector_buf, 4, "Start sector"))
     {
-      fclose(file);
       return 0;
     }
 
@@ -989,32 +951,17 @@ namespace xfer
         static_cast<unsigned char>(file_size)};
     if (!write_all(size_buf, 4, "File size"))
     {
-      fclose(file);
       return 0;
     }
 
     // 6. Send File Data & Calculate CRC
-    unsigned char buffer[4096];
     crc8::crc_t checksum = 0;
-    size_t bytes_read;
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0)
+    if (!StreamAndCrc(file.get(), checksum, [&](const unsigned char* data, size_t len) {
+          return write_all(data, len, "File data");
+        }))
     {
-      if (!write_all(buffer, bytes_read, "File data"))
-      {
-        fclose(file);
-        return 0;
-      }
-      checksum = crc8::crc_update(checksum, buffer, bytes_read);
-    }
-
-    if (ferror(file))
-    {
-      std::cerr << "[DoSdUpload] File read error." << std::endl;
-      fclose(file);
       return 0;
     }
-
-    fclose(file);
 
     // 7. Send Checksum
     if (!write_all(&checksum, 1, "Checksum"))
