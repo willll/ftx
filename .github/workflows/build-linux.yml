@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
 
 jobs:
@@ -29,20 +31,16 @@ jobs:
           cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC=ON
           cmake --build .
+          mv ftx ftx-linux
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: ftx
-          path: build/ftx
+          name: ftx-linux
+          path: build/ftx-linux
 
-      - name: Upload executable to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          upload_url: https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${GITHUB_REF##*/}/assets
-          asset_path: build/ftx
-          asset_name: ftx
-          asset_content_type: application/octet-stream
-        if: github.ref_type == 'tag'
+          files: build/ftx-linux

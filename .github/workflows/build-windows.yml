@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
 
 jobs:
@@ -27,22 +29,16 @@ jobs:
           export PATH="/opt/mxe-w64/usr/bin/:$PATH"
           x86_64-w64-mingw32.static-cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC=ON
           x86_64-w64-mingw32.static-cmake --build .
-          x86_64-w64-mingw32.static-strip ftx.exe -o ../ftx.exe
+          x86_64-w64-mingw32.static-strip ftx.exe -o ../ftx-windows.exe
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: ftx.exe
-          path: ftx.exe
+          name: ftx-windows.exe
+          path: ftx-windows.exe
 
-      - name: Upload executable to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          upload_url: https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${GITHUB_REF##*/}/assets
-          asset_path: ftx.exe
-          asset_name: ftx.exe
-          asset_content_type: application/octet-stream
-        if: github.ref_type == 'tag'
-
+          files: ftx-windows.exe
