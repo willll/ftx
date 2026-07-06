@@ -151,7 +151,8 @@ struct CommandLineArgs {
     int vid = VID; ///< USB Vendor ID
     int pid = PID; ///< USB Product ID
     std::string serial = ""; ///< Device Serial
-    bool console = false; ///< Run debug console
+    bool terminal = false; ///< Run terminal mode (bidirectional)
+    bool console = false; ///< Run debug console (read-only)
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
     int verbose_level = 0; ///< Verbose tracing level (0=none, 1=GDB, 2=all)
@@ -177,7 +178,8 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("pid", po::value<std::string>(), "Device PID (hex) [optional]")
         ("serial,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
         ("l,l", "List available FTDI devices")
-        ("c,c", "Run debug console")
+        ("terminal,t", "Run terminal mode (bidirectional)")
+        ("console,c", "Run debug console (read-only)")
         ("g,g", po::value<std::string>()->implicit_value("1234"), "Run raw TCP proxy [optional port]")
         ("verbose_level", po::value<int>(), "Verbose level")
         ("v", "Output GDB commands")
@@ -262,7 +264,10 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
             args.command = CommandLineArgs::LCRC;
             args.filename = vm["lcrc"].as<std::string>();
         }
-        if (vm.count("c")) {
+        if (vm.count("terminal") || vm.count("t")) {
+            args.terminal = true;
+        }
+        if (vm.count("console") || vm.count("c")) {
             args.console = true;
         }
         if (vm.count("g")) {
@@ -338,7 +343,7 @@ int main(int argc, char *argv[])
     g_verbose_level = args.verbose_level;
     g_verbose = (g_verbose_level >= 2);
 
-    if (args.command == CommandLineArgs::NONE && !args.console && !args.tcp_proxy) {
+    if (args.command == CommandLineArgs::NONE && !args.terminal && !args.console && !args.tcp_proxy) {
         PrintUsage(argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -422,8 +427,11 @@ int main(int argc, char *argv[])
         if (args.tcp_proxy) {
             return ftdi::DoTcpProxy(args.tcp_port, (g_verbose_level >= 1));
         }
+        if (args.terminal) {
+            ftdi::DoConsole(true);
+        }
         if (args.console) {
-            ftdi::DoConsole();
+            ftdi::DoConsole(false);
         }
     } else {
         return EXIT_FAILURE;

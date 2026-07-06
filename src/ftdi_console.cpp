@@ -52,7 +52,7 @@ namespace ftdi {
 /**
  * @brief Enter debug console mode, printing device output to stdout and acknowledging character consumption.
  */
-void DoConsole(bool acknowledge)
+void DoConsole(bool enable_stdin, bool acknowledge)
 {
     // setting std::cout to unbuffered mode
     // std::cout.setf(std::ios::unitbuf);
@@ -69,12 +69,13 @@ void DoConsole(bool acknowledge)
                        "[DoConsole][dbg] acknowledge=" << acknowledge
                        << ", ackByte=0x" << std::hex << static_cast<int>(ackByte) << std::dec << std::endl);
 
-    // Stdin reader thread: collect key presses into lines and publish only when '\n' is received.
     std::mutex stdinLineQueueMutex;
     std::deque<std::string> stdinLineQueue;
+    std::thread stdinReaderThread;
 
-    std::thread stdinReaderThread([&]() {
-        std::string pendingLine;
+    if (enable_stdin) {
+        stdinReaderThread = std::thread([&]() {
+            std::string pendingLine;
         cdbg << "[DoConsole][dbg] stdin reader thread started" << std::endl;
 
         // Use a timed wait on stdin so the thread can exit quickly when
@@ -192,7 +193,8 @@ void DoConsole(bool acknowledge)
         }
 
         cdbg << "[DoConsole][dbg] stdin reader thread exiting" << std::endl;
-    });
+        });
+    }
 
     // Step 5: Continuously read data from the device
     while (status >= 0 && !g_interrupt_flag)
@@ -275,7 +277,7 @@ void DoConsole(bool acknowledge)
         // Send complete stdin lines gathered by the input thread.
         bool sentAnyStdinLine = false;
         std::deque<std::string> linesToSend;
-        {
+        if (enable_stdin) {
             std::lock_guard<std::mutex> lock(stdinLineQueueMutex);
             if (!stdinLineQueue.empty())
             {

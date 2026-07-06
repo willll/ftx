@@ -86,9 +86,10 @@ void Signal(int sig);
 
 /**
  * @brief Enter debug console mode, printing device output to stdout.
+ * @param enable_stdin Whether to read user input and forward it to the device.
  * @param acknowledge Whether to send acknowledgment bytes to the device.
  */
-void DoConsole(bool acknowledge = false);
+void DoConsole(bool enable_stdin, bool acknowledge = false);
 
 /**
  * @brief Start a raw TCP proxy that forwards bytes between TCP and FTDI.
