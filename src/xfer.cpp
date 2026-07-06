@@ -40,6 +40,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #include "crc.hpp"
 #include "ftdi.hpp"
@@ -330,16 +331,17 @@ namespace xfer
     template <typename WriteFunc>
     bool StreamAndCrc(FILE* f, crc8::crc_t& checksum_out, WriteFunc write_func)
     {
-      unsigned char buffer[4096];
+      // Use a larger buffer (e.g., 64KB) to optimize file I/O and match USB chunk capabilities
+      std::vector<unsigned char> buffer(xfer::USB_READPACKET_SIZE);
       crc8::crc_t checksum = 0;
       size_t bytes_read;
-      while ((bytes_read = fread(buffer, 1, sizeof(buffer), f)) > 0)
+      while ((bytes_read = fread(buffer.data(), 1, buffer.size(), f)) > 0)
       {
-        if (!write_func(buffer, bytes_read))
+        if (!write_func(buffer.data(), bytes_read))
         {
           return false;
         }
-        checksum = crc8::crc_update(checksum, buffer, bytes_read);
+        checksum = crc8::crc_update(checksum, buffer.data(), bytes_read);
       }
       if (ferror(f))
       {
@@ -549,12 +551,13 @@ namespace xfer
 
     cdbg << "[DoDownload] Reading data from device..." << std::endl;
     
-    unsigned char buffer[4096];
+    // Allocate a buffer matching the configured FTDI read chunk size to maximize USB throughput
+    std::vector<unsigned char> buffer(xfer::USB_READPACKET_SIZE);
     std::size_t received = 0;
     while (size - received > 0 && !ftdi::g_interrupt_flag)
     {
-      size_t to_read = std::min<size_t>(sizeof(buffer), size - received);
-      status = ftdi_read_data(&ftdi::g_Device, buffer, to_read);
+      size_t to_read = std::min<size_t>(buffer.size(), size - received);
+      status = ftdi_read_data(&ftdi::g_Device, buffer.data(), to_read);
       if (status < 0)
       {
         std::cerr << "[DoDownload] Read data error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
@@ -562,12 +565,12 @@ namespace xfer
       }
       if (status > 0)
       {
-        if (fwrite(buffer, 1, status, file.get()) != static_cast<size_t>(status))
+        if (fwrite(buffer.data(), 1, status, file.get()) != static_cast<size_t>(status))
         {
           std::cerr << "[DoDownload] File write error" << std::endl;
           return 0;
         }
-        calcChecksum = crc8::crc_update(calcChecksum, buffer, status);
+        calcChecksum = crc8::crc_update(calcChecksum, buffer.data(), status);
         received += status;
         cdbg << "[DoDownload] Received " << received << "/" << size << " bytes..." << std::endl;
       }
