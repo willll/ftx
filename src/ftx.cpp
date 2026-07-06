@@ -138,6 +138,7 @@ void PrintUsage(const char* progName) {
     std::cout << "  " << prog << " -u data.bin 0x200000\n";
     std::cout << "  " << prog << " -x prog.bin 0x200000\n";
     std::cout << "  " << prog << " -r 0x200000\n";
+    std::cout << "  " << prog << " -t\n";
     std::cout << "  " << prog << " -c\n";
     std::cout << "  " << prog << " --ls cd/data\n";
     std::cout << "  " << prog << " --rm old.bin\n";

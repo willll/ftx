@@ -50,7 +50,7 @@
 namespace ftdi {
 
 /**
- * @brief Enter debug console mode, printing device output to stdout and acknowledging character consumption.
+ * @copydoc ftdi::DoConsole
  */
 void DoConsole(bool enable_stdin, bool acknowledge)
 {
@@ -351,8 +351,7 @@ void DoConsole(bool enable_stdin, bool acknowledge)
 }
 
 /**
- * @brief Signal handler for clean exit on interrupt.
- * @param sig Signal number.
+ * @copydoc ftdi::Signal
  */
 void Signal(int sig)
 {
