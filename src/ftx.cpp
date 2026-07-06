@@ -109,12 +109,20 @@ void CoreDumpSignalHandler(int sig) {
 void PrintUsage(const char* progName) {
     // Use Boost.Filesystem to get the program name only
     std::string prog = boost::filesystem::path(progName).filename().string();
+
+#ifdef FTX_VERSION
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+    std::cout << prog << " version " << TOSTRING(FTX_VERSION) << "\n";
+#endif
+
     std::cout << "Usage: " << prog << " [-options] [-commands]\n\n";
     std::cout << "Options:\n";
     std::cout << "  --vid <VID>                   Device VID (Default 0x0403)\n";
     std::cout << "  --pid <PID>                   Device PID (Default 0x6001)\n";
     std::cout << "  -s  <Serial>                  Device Serial (Default : Will match VID and PID with an FTDI serial)\n";
-    std::cout << "  -c                            Run debug console\n";
+    std::cout << "  -t, --terminal                Run terminal mode (bidirectional)\n";
+    std::cout << "  -c, --console                 Run debug console (read-only)\n";
     std::cout << "  -g  [port]                    Run raw TCP<->FTDI proxy (Default port 1234)\n";
     std::cout << "  -v                            Output GDB commands\n";
     std::cout << "  -vv                           Output GDB commands and all dbg execution traces\n";

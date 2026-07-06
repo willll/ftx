@@ -124,6 +124,18 @@ endif()
 # Define FTX_DEBUG_BUILD for debug builds to conditionally enable features
 target_compile_definitions(ftx PRIVATE $<$<CONFIG:Debug>:FTX_DEBUG_BUILD>)
 
+# Get Git version for the CLI
+execute_process(
+    COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(GIT_VERSION)
+  target_compile_definitions(ftx PRIVATE FTX_VERSION=${GIT_VERSION})
+endif()
+
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
 
