@@ -113,7 +113,8 @@ make
 - `--pid <PID>`: Device PID (default: 0x6001)
 - `-s <Serial>`: Match specific device by FTDI serial string
 - `-l`      : List all connected FTDI devices
-- `-c`      : Run debug console
+- `-t`      : Run terminal mode (bidirectional stdin/stdout)
+- `-c`      : Run debug console (read-only stdout)
 - `-g [port]`: Run raw TCP<->FTDI proxy (default port: 1234)
 - `-v`      : Print traced RSP packets as `GDB>...` and `Target>...` lines (GDB commands)
 - `-vv`     : Enable detailed progress logs, initialization traces, and GDB packet tracing
