@@ -125,9 +125,11 @@ make
 - `-u <file> <address>`      : Upload data from file to device
 - `-x <file> <address>`      : Upload program and execute
 - `-r <address>`             : Execute program at address
-- `-dump <file>`             : Dump the Sega Saturn BIOS to a file
+- `-D, --dump <file>`        : Dump the Sega Saturn BIOS to a file
 - `--ls <path>`              : List files and directories at the specified path on the target. Combine with `-l` for detailed listing with sizes and dates.
 - `--rm <path>`              : Remove a file or empty directory on the target
+- `--mkdir <path>`           : Create a directory on the target
+- `--rmdir <path>`           : Delete a directory on the target
 - `--cp <file> <target>`     : Copy a file to the target. `<target>` can be a FAT path (e.g., `/folder/file.bin`) or raw SD sectors (`sdraw:start:count`).
 - `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target
 - `--lcrc <file>`            : Calculate and print the CRC-8 checksum for a local host file

@@ -119,13 +119,13 @@ void PrintUsage(const char* progName) {
     std::cout << "  -v                            Output GDB commands\n";
     std::cout << "  -vv                           Output GDB commands and all dbg execution traces\n";
     std::cout << "  -l                            List available FTDI devices\n";
-    std::cout << "  -help                         Help\n\n";
+    std::cout << "  -h, --help                    Help\n\n";
     std::cout << "Commands:\n";
     std::cout << "  -d  <file>  <address>  <size> Download data to file\n";
     std::cout << "  -u  <file>  <address>         Upload data from file\n";
     std::cout << "  -x  <file>  <address>         Upload program and execute\n";
     std::cout << "  -r  <address>                 Execute program (Does not work !)\n";
-    std::cout << "  -dump  <file>                 Dump BIOS to file\n\n";
+    std::cout << "  -D, --dump <file>             Dump BIOS to file\n\n";
     std::cout << "  --ls <path>                   List files and directories\n";
     std::cout << "  --rm <path>                   Remove a file or empty directory\n";
     std::cout << "  --mkdir <path>                Create a directory\n";
