@@ -57,7 +57,7 @@ const char* strsignal(int sig) {
 }
 #endif
 
-#ifdef FTX_DEBUG_BUILD
+#if defined(FTX_DEBUG_BUILD) && !defined(_WIN32)
 #include <unistd.h>
 #include <execinfo.h>
 #endif
@@ -85,14 +85,14 @@ const int PID = 0x6001;
 void CoreDumpSignalHandler(int sig) {
     std::cerr << "\nCritical error: Caught signal " << sig << " (" << strsignal(sig) << ").\n";
 
-#ifdef FTX_DEBUG_BUILD
+#if defined(FTX_DEBUG_BUILD) && !defined(_WIN32)
     std::cerr << "Call stack:\n";
     const int MAX_STACK_FRAMES = 128;
     void *buffer[MAX_STACK_FRAMES];
     int nptrs = backtrace(buffer, MAX_STACK_FRAMES);
     backtrace_symbols_fd(buffer, nptrs, STDERR_FILENO);
 #else
-    std::cerr << "Program was not built in Debug mode. No call stack available.\n";
+    std::cerr << "Program was not built in Debug mode (or running on Windows). No call stack available.\n";
 #endif
 
     // Unregister our handler and fall back to the default action
@@ -175,13 +175,14 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     desc.add_options()
         ("vid", po::value<std::string>(), "Device VID (hex) [optional]")
         ("pid", po::value<std::string>(), "Device PID (hex) [optional]")
-        ("s,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
+        ("serial,s", po::value<std::string>(), "Device Serial (Default : Will match VID and PID with an FTDI serial) [optional]")
         ("l,l", "List available FTDI devices")
         ("c,c", "Run debug console")
         ("g,g", po::value<std::string>()->implicit_value("1234"), "Run raw TCP proxy [optional port]")
         ("verbose_level", po::value<int>(), "Verbose level")
         ("v", "Output GDB commands")
         ("vv", "Output GDB commands and dbg execution traces")
+        ("verbose", "Output GDB commands and dbg execution traces (alias for vv)")
         ("d,d", po::value<std::vector<std::string>>()->multitoken(), "Download: <file> <address> <size>")
         ("u,u", po::value<std::vector<std::string>>()->multitoken(), "Upload: <file> <address>")
         ("x,x", po::value<std::vector<std::string>>()->multitoken(), "Exec: <file> <address>")
@@ -199,42 +200,11 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     po::variables_map vm;
 
     try {
-        // Normalize legacy single-dash long options so "-verbose" and "-help"
-        // are not misparsed as clustered short options (e.g. -v erbose).
-        std::vector<std::string> normalizedArgs;
-        normalizedArgs.reserve(static_cast<size_t>(argc));
-        for (int i = 0; i < argc; ++i) {
-            std::string token = argv[i] ? argv[i] : "";
-            if (token == "-verbose") {
-                token = "--vv";
-            } else if (token == "-v") {
-                token = "--v";
-            } else if (token == "-vv") {
-                token = "--vv";
-            } else if (token == "-help") {
-                token = "--help";
-            } else if (token == "-ls") {
-                token = "--ls";
-            } else if (token == "-rm") {
-                token = "--rm";
-            } else if (token == "-mkdir") {
-                token = "--mkdir";
-            } else if (token == "-rmdir") {
-                token = "--rmdir";
-            } else if (token == "-cp") {
-                token = "--cp";
-            } else if (token == "-crc") {
-                token = "--crc";
-            } else if (token == "-lcrc") {
-                token = "--lcrc";
-            }
-            normalizedArgs.push_back(token);
-        }
-
-        auto parsed = po::command_line_parser(normalizedArgs)
+        auto parsed = po::command_line_parser(argc, argv)
                   .options(desc)
                   .style(po::command_line_style::unix_style |
-                         po::command_line_style::allow_short)
+                         po::command_line_style::allow_short |
+                         po::command_line_style::allow_long_disguise)
                   .run();
 
         po::store(parsed, vm);
@@ -245,100 +215,112 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if (vm.count("vid")) {
-        args.vid = std::stoi(vm["vid"].as<std::string>(), nullptr, 16);
-    }
-    if (vm.count("pid")) {
-        args.pid = std::stoi(vm["pid"].as<std::string>(), nullptr, 16);
-    }
-    if (vm.count("s")) {
-        args.serial = vm["s"].as<std::string>();
-    }
-    if (vm.count("l")) {
-        args.command = CommandLineArgs::LIST_DEVICES;
-    }
-    if (vm.count("ls")) {
-        args.command = CommandLineArgs::LS;
+    try {
+        if (vm.count("help") || vm.count("h")) {
+            PrintUsage(argv[0]);
+            exit(EXIT_SUCCESS);
+        }
+        if (vm.count("vid")) {
+            args.vid = std::stoi(vm["vid"].as<std::string>(), nullptr, 16);
+        }
+        if (vm.count("pid")) {
+            args.pid = std::stoi(vm["pid"].as<std::string>(), nullptr, 16);
+        }
+        if (vm.count("serial")) {
+            args.serial = vm["serial"].as<std::string>();
+        }
         if (vm.count("l")) {
-            args.filename = std::string("-l ") + vm["ls"].as<std::string>();
-        } else {
-            args.filename = vm["ls"].as<std::string>();
+            args.command = CommandLineArgs::LIST_DEVICES;
         }
-    } else if (vm.count("rm")) {
-        args.command = CommandLineArgs::RM;
-        args.filename = vm["rm"].as<std::string>();
-    } else if (vm.count("mkdir")) {
-        args.command = CommandLineArgs::MKDIR;
-        args.filename = vm["mkdir"].as<std::string>();
-    } else if (vm.count("rmdir")) {
-        args.command = CommandLineArgs::RMDIR;
-        args.filename = vm["rmdir"].as<std::string>();
-    } else if (vm.count("cp")) {
-        auto vals = vm["cp"].as<std::vector<std::string>>();
-        if (vals.size() == 2) {
-            args.command = CommandLineArgs::CP;
-            args.filename = vals[0];
-            args.target = vals[1];
+        if (vm.count("ls")) {
+            args.command = CommandLineArgs::LS;
+            if (vm.count("l")) {
+                args.filename = std::string("-l ") + vm["ls"].as<std::string>();
+            } else {
+                args.filename = vm["ls"].as<std::string>();
+            }
+        } else if (vm.count("rm")) {
+            args.command = CommandLineArgs::RM;
+            args.filename = vm["rm"].as<std::string>();
+        } else if (vm.count("mkdir")) {
+            args.command = CommandLineArgs::MKDIR;
+            args.filename = vm["mkdir"].as<std::string>();
+        } else if (vm.count("rmdir")) {
+            args.command = CommandLineArgs::RMDIR;
+            args.filename = vm["rmdir"].as<std::string>();
+        } else if (vm.count("cp")) {
+            auto vals = vm["cp"].as<std::vector<std::string>>();
+            if (vals.size() == 2) {
+                args.command = CommandLineArgs::CP;
+                args.filename = vals[0];
+                args.target = vals[1];
+            }
+        } else if (vm.count("crc")) {
+            args.command = CommandLineArgs::CRC;
+            args.filename = vm["crc"].as<std::string>();
+        } else if (vm.count("lcrc")) {
+            args.command = CommandLineArgs::LCRC;
+            args.filename = vm["lcrc"].as<std::string>();
         }
-    } else if (vm.count("crc")) {
-        args.command = CommandLineArgs::CRC;
-        args.filename = vm["crc"].as<std::string>();
-    } else if (vm.count("lcrc")) {
-        args.command = CommandLineArgs::LCRC;
-        args.filename = vm["lcrc"].as<std::string>();
-    }
-    if (vm.count("c")) {
-        args.console = true;
-    }
-    if (vm.count("g")) {
-        args.tcp_proxy = true;
-        std::string port_str = vm["g"].as<std::string>();
-        try {
-            args.tcp_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
-        } catch (const std::exception& e) {
-            std::cerr << "Error parsing GDB port: " << e.what() << std::endl;
-            args.tcp_port = 1234;
+        if (vm.count("c")) {
+            args.console = true;
         }
-    }
-    if (vm.count("vv")) {
-        args.verbose_level = 2;
-    } else if (vm.count("v")) {
-        args.verbose_level = 1;
-    } else if (vm.count("verbose_level")) {
-        args.verbose_level = vm["verbose_level"].as<int>();
-    }
-    if (vm.count("d")) {
-        auto vals = vm["d"].as<std::vector<std::string>>();
-        if (vals.size() == 3) {
-            args.command = CommandLineArgs::DOWNLOAD;
-            args.filename = vals[0];
-            args.address = std::stoul(vals[1], nullptr, 0);
-            args.length = std::stoul(vals[2], nullptr, 0);
+        if (vm.count("g")) {
+            args.tcp_proxy = true;
+            std::string port_str = vm["g"].as<std::string>();
+            try {
+                args.tcp_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
+            } catch (const std::exception& e) {
+                std::cerr << "Error parsing GDB port: " << e.what() << std::endl;
+                args.tcp_port = 1234;
+            }
         }
-    } else if (vm.count("u")) {
-        auto vals = vm["u"].as<std::vector<std::string>>();
-        if (vals.size() == 2) {
-            args.command = CommandLineArgs::UPLOAD;
-            args.filename = vals[0];
-            args.address = std::stoul(vals[1], nullptr, 0);
+        if (vm.count("vv") || vm.count("verbose")) {
+            args.verbose_level = 2;
+        } else if (vm.count("v")) {
+            args.verbose_level = 1;
+        } else if (vm.count("verbose_level")) {
+            args.verbose_level = vm["verbose_level"].as<int>();
         }
-    } else if (vm.count("x")) {
-        auto vals = vm["x"].as<std::vector<std::string>>();
-        if (vals.size() == 2) {
-            args.command = CommandLineArgs::EXEC;
-            args.filename = vals[0];
-            args.address = std::stoul(vals[1], nullptr, 0);
+        if (vm.count("d")) {
+            auto vals = vm["d"].as<std::vector<std::string>>();
+            if (vals.size() == 3) {
+                args.command = CommandLineArgs::DOWNLOAD;
+                args.filename = vals[0];
+                args.address = std::stoul(vals[1], nullptr, 0);
+                args.length = std::stoul(vals[2], nullptr, 0);
+            }
+        } else if (vm.count("u")) {
+            auto vals = vm["u"].as<std::vector<std::string>>();
+            if (vals.size() == 2) {
+                args.command = CommandLineArgs::UPLOAD;
+                args.filename = vals[0];
+                args.address = std::stoul(vals[1], nullptr, 0);
+            }
+        } else if (vm.count("x")) {
+            auto vals = vm["x"].as<std::vector<std::string>>();
+            if (vals.size() == 2) {
+                args.command = CommandLineArgs::EXEC;
+                args.filename = vals[0];
+                args.address = std::stoul(vals[1], nullptr, 0);
+            }
+        } else if (vm.count("r")) {
+            args.command = CommandLineArgs::RUN;
+            args.address = std::stoul(vm["r"].as<std::string>(), nullptr, 0);
         }
-    } else if (vm.count("r")) {
-        args.command = CommandLineArgs::RUN;
-        args.address = std::stoul(vm["r"].as<std::string>(), nullptr, 0);
-    }
-    else if (vm.count("help") || vm.count("h")) {
-        args.command = CommandLineArgs::NONE;
-    } 
-    else if (vm.count("dump")) {
-        args.command = CommandLineArgs::DUMP;
-        args.filename = vm["dump"].as<std::string>();
+        else if (vm.count("dump")) {
+            args.command = CommandLineArgs::DUMP;
+            args.filename = vm["dump"].as<std::string>();
+        }
+    } catch (const std::invalid_argument& e) {
+        std::cerr << "Error: Invalid numeric argument provided." << std::endl;
+        exit(EXIT_FAILURE);
+    } catch (const std::out_of_range& e) {
+        std::cerr << "Error: Numeric argument out of range." << std::endl;
+        exit(EXIT_FAILURE);
+    } catch (const std::exception& e) {
+        std::cerr << "Error parsing arguments: " << e.what() << std::endl;
+        exit(EXIT_FAILURE);
     }
 
     return args;
