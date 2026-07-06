@@ -8,6 +8,9 @@ on:
       - 'v*'
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   build-win32:
     name: Build Windows

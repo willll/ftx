@@ -8,6 +8,9 @@ on:
       - 'v*'
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   build-macos:
     name: Build macOS (ARM64)
