@@ -213,9 +213,9 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
     try {
         auto parsed = po::command_line_parser(argc, argv)
                   .options(desc)
-                  .style(po::command_line_style::unix_style |
-                         po::command_line_style::allow_short |
-                         po::command_line_style::allow_long_disguise)
+                  .style((po::command_line_style::unix_style |
+                         po::command_line_style::allow_long_disguise) &
+                         ~po::command_line_style::allow_guessing)
                   .run();
 
         po::store(parsed, vm);
