@@ -98,6 +98,14 @@ target_include_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS}
 target_link_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARY_DIRS})
 target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LINK_LIBS})
 
+if(APPLE AND BUILD_STATIC)
+  target_link_libraries(libftdi1_pkgconfig INTERFACE
+    "-framework CoreFoundation"
+    "-framework IOKit"
+    "-framework Security"
+  )
+endif()
+
 # When building statically on Linux, libusb may require libudev; add it
 # to the pkgconfig wrapper so the final link picks it up.
 if(BUILD_STATIC AND UNIX AND NOT APPLE)
