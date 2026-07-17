@@ -287,6 +287,22 @@ namespace ftdi {
 
 /**
  * @copydoc ftdi::DoWebDavServer
+ * @brief Runs a local WebDAV server that translates standard WebDAV methods to cartridge file commands.
+ * @details Listens on the specified port, accepts connection requests, and processes WebDAV methods:
+ * - OPTIONS: Returns supported methods (OPTIONS, GET, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY).
+ * - PROPFIND: Retrieves item metadata and directory listings from the Saturn cartridge.
+ * - PUT: Uploads host file contents to the cartridge.
+ * - DELETE: Deletes files or directories from the cartridge.
+ * - MKCOL: Creates directories on the cartridge.
+ * - MOVE: Renames or moves files/directories on the cartridge.
+ * - GET: Downloads files from the cartridge.
+ * - COPY: Copies files on the cartridge by downloading and re-uploading locally.
+ *
+ * It uses case-insensitive lookup (via `get_item_metadata`) to safely resolve user-provided paths 
+ * against the FatFS on the console.
+ *
+ * @param port The TCP port to listen on.
+ * @return 0 on successful termination, 1 on critical server failure.
  */
 int DoWebDavServer(uint16_t port) {
     try {

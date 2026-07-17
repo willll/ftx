@@ -348,6 +348,13 @@ namespace xfer
       return 0;
     }
 
+    /**
+     * @brief Send a Remote I/O rename (move) command packet to the device.
+     * @details Packs the old and new path payloads separated by a null byte and sends them to the cartridge.
+     * @param old_path The current file/directory path on the Saturn.
+     * @param new_path The new file/directory target path on the Saturn.
+     * @return true on success, false on write or length failure.
+     */
     bool SendRemoteIoRenameCommand(const char *old_path, const char *new_path)
     {
       if (old_path == nullptr || new_path == nullptr)
@@ -393,8 +400,16 @@ namespace xfer
       return true;
     }
 
+    /**
+     * @brief Send rename command and read/process the status response from the cartridge.
+     * @param old_path The source path on the Saturn.
+     * @param new_path The destination path on the Saturn.
+     * @param label A label string for log messages (e.g. "DoRename").
+     * @return 1 on success, 0 on failure.
+     */
     int ExecuteRemoteIoRenameCommand(const char *old_path, const char *new_path,
                                      const char *label)
+
     {
       if (!SendRemoteIoRenameCommand(old_path, new_path))
       {
@@ -1175,9 +1190,16 @@ namespace xfer
 
   /**
    * @copydoc xfer::DoSdDownload
+   * @details Downloads files from the Sega Saturn SD card over HostIO.
+   * Protocol sequence:
+   * 1. Host sends RemoteIoCommand::DOWNLOAD with target path payload.
+   * 2. Saturn replies with RemoteIoStatus and a 4-byte big-endian file size payload.
+   * 3. Host reads file data sequentially, accumulating CRC-8 checksum.
+   * 4. Saturn sends 1-byte final CRC-8 checksum for verification.
    */
   int DoSdDownload(const char *saturn_sd_path, const char *host_filename)
   {
+    // Step 1: Validate parameters and attempt to open destination file on the host machine.
     if (saturn_sd_path == nullptr || host_filename == nullptr)
     {
       std::cerr << "[DoSdDownload] Missing path/filename argument." << std::endl;
@@ -1191,11 +1213,13 @@ namespace xfer
       return 0;
     }
 
+    // Step 2: Send DOWNLOAD command packet containing target SD card path to the console.
     if (!SendRemoteIoCommand(RemoteIoCommand::DOWNLOAD, saturn_sd_path))
     {
       return 0;
     }
 
+    // Step 3: Wait and parse the Remote I/O response status from the console.
     RemoteIoReply reply;
     if (!ReadRemoteIoReply(reply))
     {
@@ -1209,6 +1233,7 @@ namespace xfer
       return 0;
     }
 
+    // Step 4: Extract the 32-bit big-endian file size from the reply payload.
     if (reply.payload.size() < 4)
     {
       std::cerr << "[DoSdDownload] Invalid response payload size." << std::endl;
@@ -1221,6 +1246,7 @@ namespace xfer
         (static_cast<uint32_t>(reply.payload[2]) << 8) |
         static_cast<uint32_t>(reply.payload[3]);
 
+    // Step 5: Read the file stream chunk-by-chunk from FTDI and calculate local checksum.
     uint8_t buffer[4096];
     uint32_t received = 0;
     crc8::crc_t checksum = 0;
@@ -1248,6 +1274,7 @@ namespace xfer
       received += chunk;
     }
 
+    // Step 6: Retrieve and verify the trailing CRC-8 checksum sent by the Saturn.
     uint8_t device_checksum = 0;
     if (!ReadExactFromDevice(&device_checksum, 1))
     {
