@@ -124,6 +124,7 @@ void PrintUsage(const char* progName) {
     std::cout << "  -t, --terminal                Run terminal mode (bidirectional)\n";
     std::cout << "  -c, --console                 Run debug console (read-only)\n";
     std::cout << "  -g  [port]                    Run raw TCP<->FTDI proxy (Default port 1234)\n";
+    std::cout << "  -wd, --webdav [port]          Run WebDAV server (Default port 8080)\n";
     std::cout << "  -v                            Output GDB commands\n";
     std::cout << "  -vv                           Output GDB commands and all dbg execution traces\n";
     std::cout << "  -l                            List available FTDI devices\n";
@@ -164,8 +165,10 @@ struct CommandLineArgs {
     bool console = false; ///< Run debug console (read-only)
     bool tcp_proxy = false; ///< Run raw TCP proxy
     uint16_t tcp_port = 1234; ///< TCP proxy port
+    bool webdav = false; ///< Run WebDAV server
+    uint16_t webdav_port = 8080; ///< WebDAV port
     int verbose_level = 0; ///< Verbose tracing level (0=none, 1=GDB, 2=all)
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC, MKDIR, RMDIR } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC, MKDIR, RMDIR, GET } command = NONE; ///< Command type
     std::string filename; ///< File name for transfer
     std::string target; ///< Target path for copy operations
     unsigned int address = 0; ///< Address for transfer/execute
@@ -190,6 +193,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("terminal,t", "Run terminal mode (bidirectional)")
         ("console,c", "Run debug console (read-only)")
         ("g,g", po::value<std::string>()->implicit_value("1234"), "Run raw TCP proxy [optional port]")
+        ("webdav,wd", po::value<std::string>()->implicit_value("8080"), "Run WebDAV server [optional port]")
         ("verbose_level", po::value<int>(), "Verbose level")
         ("v", "Output GDB commands")
         ("vv", "Output GDB commands and dbg execution traces")
@@ -205,6 +209,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("cp", po::value<std::vector<std::string>>()->multitoken(), "Copy: <file> <sdraw:start:count>")
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
         ("lcrc", po::value<std::string>(), "Print CRC-8 for a local file: <file>")
+        ("get", po::value<std::vector<std::string>>()->multitoken(), "Download file from Saturn SD card: <saturn_path> <host_file>")
         ("help,h", "Help: Show this help message")
         ("dump,D", po::value<std::string>(), "Dump BIOS: <file>");
 
@@ -269,6 +274,13 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         } else if (vm.count("crc")) {
             args.command = CommandLineArgs::CRC;
             args.filename = vm["crc"].as<std::string>();
+        } else if (vm.count("get")) {
+            auto vals = vm["get"].as<std::vector<std::string>>();
+            if (vals.size() == 2) {
+                args.command = CommandLineArgs::GET;
+                args.filename = vals[0];
+                args.target = vals[1];
+            }
         } else if (vm.count("lcrc")) {
             args.command = CommandLineArgs::LCRC;
             args.filename = vm["lcrc"].as<std::string>();
@@ -287,6 +299,16 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
             } catch (const std::exception& e) {
                 std::cerr << "Error parsing GDB port: " << e.what() << std::endl;
                 args.tcp_port = 1234;
+            }
+        }
+        if (vm.count("webdav")) {
+            args.webdav = true;
+            std::string port_str = vm["webdav"].as<std::string>();
+            try {
+                args.webdav_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
+            } catch (const std::exception& e) {
+                std::cerr << "Error parsing WebDAV port: " << e.what() << std::endl;
+                args.webdav_port = 8080;
             }
         }
         if (vm.count("vv") || vm.count("verbose")) {
@@ -352,7 +374,7 @@ int main(int argc, char *argv[])
     g_verbose_level = args.verbose_level;
     g_verbose = (g_verbose_level >= 2);
 
-    if (args.command == CommandLineArgs::NONE && !args.terminal && !args.console && !args.tcp_proxy) {
+    if (args.command == CommandLineArgs::NONE && !args.terminal && !args.console && !args.tcp_proxy && !args.webdav) {
         PrintUsage(argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -425,6 +447,9 @@ int main(int argc, char *argv[])
             case CommandLineArgs::CRC:
                 status = xfer::DoCrc(args.filename.c_str());
                 break;
+            case CommandLineArgs::GET:
+                status = xfer::DoSdDownload(args.filename.c_str(), args.target.c_str());
+                break;
             default:
                 break;
         }
@@ -435,6 +460,9 @@ int main(int argc, char *argv[])
         
         if (args.tcp_proxy) {
             return ftdi::DoTcpProxy(args.tcp_port, (g_verbose_level >= 1));
+        }
+        if (args.webdav) {
+            return ftdi::DoWebDavServer(args.webdav_port);
         }
         if (args.terminal) {
             ftdi::DoConsole(true);

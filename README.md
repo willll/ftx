@@ -131,6 +131,7 @@ To install the WinUSB driver:
 - `-t`      : Run terminal mode (bidirectional stdin/stdout)
 - `-c`      : Run debug console (read-only stdout)
 - `-g [port]`: Run raw TCP<->FTDI proxy (default port: 1234)
+- `-wd [port]`: Run WebDAV server (default port: 8080)
 - `-v`      : Print traced RSP packets as `GDB>...` and `Target>...` lines (GDB commands)
 - `-vv`     : Enable detailed progress logs, initialization traces, and GDB packet tracing
 
@@ -245,6 +246,42 @@ When `-v` or `-vv` is enabled, traced packet lines are printed with one packet p
 
 - `GDB>$...` for packets received from the TCP client
 - `Target>$...` for packets received from the FTDI target
+
+## WebDAV Server Mode
+
+`-wd` starts a WebDAV server that exposes the target's FAT filesystem over the HTTP protocol. This allows you to mount the Sega Saturn USB cartridge as a network drive in Windows Explorer, macOS Finder, or Linux Nautilus to browse directories and transfer files.
+
+Start the WebDAV server on the default port (8080):
+
+```sh
+./ftx -wd
+```
+
+Or on a custom port:
+
+```sh
+./ftx -wd 8081
+```
+
+### Mounting the Filesystem
+
+#### Windows
+1. Open **File Explorer** (Win+E).
+2. Right-click **This PC** in the left sidebar and select **Map network drive...**
+3. In the "Folder" field, enter: `http://localhost:8080/`
+4. Click **Finish**. The cartridge will now appear as a network drive.
+
+#### Linux (GNOME/Nautilus)
+1. Open the **Files** (Nautilus) application.
+2. Click on **Other Locations** in the left sidebar.
+3. In the "Connect to Server" field at the bottom, enter: `dav://localhost:8080/`
+4. Click **Connect**.
+
+#### macOS
+1. Open **Finder**.
+2. From the top menu bar, select **Go** > **Connect to Server...** (or press `Cmd+K`).
+3. In the "Server Address" field, enter: `http://localhost:8080/`
+4. Click **Connect**.
 
 ### Debug Traces
 

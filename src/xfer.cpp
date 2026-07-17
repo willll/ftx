@@ -55,6 +55,24 @@ namespace xfer
 
   namespace
   {
+    /**
+     * @brief Custom deleter for std::unique_ptr managing FILE pointers.
+     * 
+     * Ensures clean closing of file descriptors when unique_ptr goes out of scope,
+     * avoiding ignored calling convention attributes on fclose when using decltype.
+     */
+    struct FileDeleter {
+        /**
+         * @brief Closes the file descriptor.
+         * @param f File pointer to close.
+         */
+        void operator()(FILE* f) const {
+            if (f) {
+                fclose(f);
+            }
+        }
+    };
+
     constexpr uint8_t REMOTE_IO_MAGIC[4] = {'S', 'R', 'L', '1'};
     constexpr uint32_t SDC_BLOCK_SIZE = 512;
 
@@ -65,7 +83,9 @@ namespace xfer
       CRC = 3,
       UPLOAD = 4,
       MKDIR = 5,
-      RMDIR = 6
+      RMDIR = 6,
+      RENAME = 7,
+      DOWNLOAD = 8
     };
 
     enum class RemoteIoStatus : uint8_t
@@ -328,6 +348,84 @@ namespace xfer
       return 0;
     }
 
+    bool SendRemoteIoRenameCommand(const char *old_path, const char *new_path)
+    {
+      if (old_path == nullptr || new_path == nullptr)
+      {
+        std::cerr << "[RemoteIO] Missing command argument." << std::endl;
+        return false;
+      }
+
+      const std::size_t oldLen = std::strlen(old_path);
+      const std::size_t newLen = std::strlen(new_path);
+      const std::size_t payloadLen = oldLen + 1 + newLen;
+      if (payloadLen > 0xFFFFU)
+      {
+        std::cerr << "[RemoteIO] Path/file argument too long." << std::endl;
+        return false;
+      }
+
+      uint8_t header[7] = {
+          REMOTE_IO_MAGIC[0],
+          REMOTE_IO_MAGIC[1],
+          REMOTE_IO_MAGIC[2],
+          REMOTE_IO_MAGIC[3],
+          static_cast<uint8_t>(RemoteIoCommand::RENAME),
+          static_cast<uint8_t>((payloadLen >> 8) & 0xFFU),
+          static_cast<uint8_t>(payloadLen & 0xFFU)};
+
+      if (!WriteAllToDevice(header, sizeof(header)))
+      {
+        return false;
+      }
+
+      if (!WriteAllToDevice(reinterpret_cast<const uint8_t *>(old_path), oldLen + 1))
+      {
+        return false;
+      }
+
+      if (newLen > 0 &&
+          !WriteAllToDevice(reinterpret_cast<const uint8_t *>(new_path), newLen))
+      {
+        return false;
+      }
+
+      return true;
+    }
+
+    int ExecuteRemoteIoRenameCommand(const char *old_path, const char *new_path,
+                                     const char *label)
+    {
+      if (!SendRemoteIoRenameCommand(old_path, new_path))
+      {
+        return 0;
+      }
+
+      RemoteIoReply reply;
+      if (!ReadRemoteIoReply(reply))
+      {
+        return 0;
+      }
+
+      if (!reply.payload.empty())
+      {
+        std::cout << reply.payload;
+        if (reply.payload.back() != '\n')
+        {
+          std::cout << std::endl;
+        }
+      }
+
+      if (reply.status == RemoteIoStatus::OK)
+      {
+        return 1;
+      }
+
+      std::cerr << "[" << label << "] Device returned status "
+                << static_cast<int>(reply.status) << std::endl;
+      return 0;
+    }
+
     template <typename WriteFunc>
     bool StreamAndCrc(FILE* f, crc8::crc_t& checksum_out, WriteFunc write_func)
     {
@@ -490,11 +588,76 @@ namespace xfer
   }
 
   /**
+   * @copydoc xfer::DoListStr
+   */
+  int DoListStr(const char *path, std::string &out_listing)
+  {
+    if (!SendRemoteIoCommand(RemoteIoCommand::LIST, path))
+    {
+      return 0;
+    }
+
+    // First packet uses the full timeout so the device has time to respond.
+    RemoteIoReply reply;
+    if (!ReadRemoteIoReply(reply))
+    {
+      return 0;
+    }
+
+    for (;;)
+    {
+      if (!reply.payload.empty())
+      {
+        out_listing += reply.payload;
+        if (out_listing.back() != '\n')
+        {
+          out_listing += '\n';
+        }
+      }
+
+      if (reply.status != RemoteIoStatus::OK)
+      {
+        std::cerr << "[DoListStr] Device returned status "
+                  << static_cast<int>(reply.status) << std::endl;
+        return 0;
+      }
+
+      if (reply.payload.empty())
+      {
+        // Empty payload + OK = explicit end-of-listing sentinel from device.
+        return 1;
+      }
+
+      // Try to read the next packet.  Use a short inter-packet timeout (200 ms)
+      // so that a single-packet response exits promptly instead of hanging for
+      // the full 5-second idle timeout.
+      const int rc = TryReadRemoteIoReply(reply, 200);
+      if (rc == 0)
+      {
+        // Timeout: no more packets — listing is complete.
+        return 1;
+      }
+      if (rc < 0)
+      {
+        return 0;
+      }
+    }
+  }
+
+  /**
    * @copydoc xfer::DoRemove
    */
   int DoRemove(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::REMOVE, path, "DoRemove");
+  }
+
+  /**
+   * @copydoc xfer::DoRename
+   */
+  int DoRename(const char *old_path, const char *new_path)
+  {
+    return ExecuteRemoteIoRenameCommand(old_path, new_path, "DoRename");
   }
 
   /**
@@ -529,7 +692,7 @@ namespace xfer
     cdbg << "[DoDownload] Starting download: file='" << filename
          << "', address=0x" << std::hex << address << ", size=" << std::dec << size << std::endl;
 
-    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(filename, "wb"), &fclose);
+    std::unique_ptr<FILE, FileDeleter> file(fopen(filename, "wb"));
     if (!file)
     {
       std::cerr << "[DoDownload] Error creating output file" << std::endl;
@@ -627,7 +790,7 @@ namespace xfer
     }
     const uint32_t size = static_cast<uint32_t>(file_size_raw);
 
-    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(filename, "rb"), &fclose);
+    std::unique_ptr<FILE, FileDeleter> file(fopen(filename, "rb"));
     if (!file)
     {
       std::cerr << "[" << functnName << "] Can't open the file '" << filename << "'" << std::endl;
@@ -772,7 +935,7 @@ namespace xfer
     }
     const uint32_t file_size = static_cast<uint32_t>(file_size_raw);
 
-    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(host_filename, "rb"), &fclose);
+    std::unique_ptr<FILE, FileDeleter> file(fopen(host_filename, "rb"));
     if (!file)
     {
       std::cerr << "[DoSdUpload] Can't open file '" << host_filename << "'" << std::endl;
@@ -781,6 +944,34 @@ namespace xfer
 
     if (saturn_sd_path != nullptr && saturn_sd_path[0] == '/')
     {
+      // Warn if target path violates 8.3 filename limits (Saturn side limitation)
+      std::string path_str(saturn_sd_path);
+      size_t start = 0;
+      while (start < path_str.size())
+      {
+        size_t end = path_str.find('/', start);
+        if (end == std::string::npos)
+        {
+          end = path_str.size();
+        }
+        std::string component = path_str.substr(start, end - start);
+        if (!component.empty())
+        {
+          size_t dot = component.rfind('.');
+          std::string name = (dot == std::string::npos) ? component : component.substr(0, dot);
+          std::string ext = (dot == std::string::npos) ? "" : component.substr(dot + 1);
+          size_t dot_count = std::count(component.begin(), component.end(), '.');
+          if (name.length() > 8 || ext.length() > 3 || dot_count > 1)
+          {
+            std::cerr << "[DoSdUpload] Warning: Target path component \"" << component 
+                      << "\" violates strict 8.3 conventions (max 8 chars name, 3 chars extension). "
+                      << "Saturn device is likely to reject this upload." << std::endl;
+            break;
+          }
+        }
+        start = end + 1;
+      }
+
       if (!SendRemoteIoCommand(RemoteIoCommand::UPLOAD, saturn_sd_path))
       {
         return 0;
@@ -980,6 +1171,97 @@ namespace xfer
     }
 
     return (result == 0x00) ? 1 : 0;
+  }
+
+  /**
+   * @copydoc xfer::DoSdDownload
+   */
+  int DoSdDownload(const char *saturn_sd_path, const char *host_filename)
+  {
+    if (saturn_sd_path == nullptr || host_filename == nullptr)
+    {
+      std::cerr << "[DoSdDownload] Missing path/filename argument." << std::endl;
+      return 0;
+    }
+
+    std::unique_ptr<FILE, FileDeleter> file(fopen(host_filename, "wb"));
+    if (!file)
+    {
+      std::cerr << "[DoSdDownload] Can't open file '" << host_filename << "' for writing" << std::endl;
+      return 0;
+    }
+
+    if (!SendRemoteIoCommand(RemoteIoCommand::DOWNLOAD, saturn_sd_path))
+    {
+      return 0;
+    }
+
+    RemoteIoReply reply;
+    if (!ReadRemoteIoReply(reply))
+    {
+      return 0;
+    }
+
+    if (reply.status != RemoteIoStatus::OK)
+    {
+      std::cerr << "[DoSdDownload] Device rejected download: "
+                << static_cast<int>(reply.status) << std::endl;
+      return 0;
+    }
+
+    if (reply.payload.size() < 4)
+    {
+      std::cerr << "[DoSdDownload] Invalid response payload size." << std::endl;
+      return 0;
+    }
+
+    const uint32_t file_size =
+        (static_cast<uint32_t>(reply.payload[0]) << 24) |
+        (static_cast<uint32_t>(reply.payload[1]) << 16) |
+        (static_cast<uint32_t>(reply.payload[2]) << 8) |
+        static_cast<uint32_t>(reply.payload[3]);
+
+    uint8_t buffer[4096];
+    uint32_t received = 0;
+    crc8::crc_t checksum = 0;
+    while (received < file_size)
+    {
+      uint32_t chunk = file_size - received;
+      if (chunk > sizeof(buffer))
+      {
+        chunk = sizeof(buffer);
+      }
+
+      if (!ReadExactFromDevice(buffer, chunk))
+      {
+        std::cerr << "[DoSdDownload] Read data failed." << std::endl;
+        return 0;
+      }
+
+      checksum = crc8::crc_update(checksum, buffer, chunk);
+      if (fwrite(buffer, 1, chunk, file.get()) != chunk)
+      {
+        std::cerr << "[DoSdDownload] Write file error." << std::endl;
+        return 0;
+      }
+
+      received += chunk;
+    }
+
+    uint8_t device_checksum = 0;
+    if (!ReadExactFromDevice(&device_checksum, 1))
+    {
+      std::cerr << "[DoSdDownload] Read checksum failed." << std::endl;
+      return 0;
+    }
+
+    if (device_checksum != checksum)
+    {
+      std::cerr << "[DoSdDownload] Checksum mismatch." << std::endl;
+      return 0;
+    }
+
+    return 1;
   }
 
 } // namespace xfer

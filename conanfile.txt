@@ -1,0 +1,10 @@
+[requires]
+boost/1.83.0
+libftdi1/1.5
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout

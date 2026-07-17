@@ -85,11 +85,27 @@ int DoBiosDump(const char *filename);
 int DoList(const char *path);
 
 /**
+ * @brief List files and directories in a path and retrieve as string.
+ * @param path Directory path to list.
+ * @param out_listing Output string to append listing to.
+ * @return 1 on success, 0 on error.
+ */
+int DoListStr(const char *path, std::string &out_listing);
+
+/**
  * @brief Remove a file or an empty directory.
  * @param path File or directory path to remove.
  * @return 1 on success, 0 on error.
  */
 int DoRemove(const char *path);
+
+/**
+ * @brief Rename or move a file or directory on the device.
+ * @param old_path Current path of the file or directory.
+ * @param new_path Target path of the file or directory.
+ * @return 1 on success, 0 on error.
+ */
+int DoRename(const char *old_path, const char *new_path);
 
 /**
  * @brief Create a directory.
@@ -137,6 +153,14 @@ int DoUpload(const char* filename, uint32_t address, const bool execute = false)
  * @return 1 on success, 0 on error.
  */
 int DoSdUpload(const char *host_filename, const char *saturn_sd_path);
+
+/**
+ * @brief Download a file from the Saturn SD card to a local file.
+ * @param saturn_sd_path Source path on the SD card FAT filesystem.
+ * @param host_filename Target local file name.
+ * @return 1 on success, 0 on error.
+ */
+int DoSdDownload(const char *saturn_sd_path, const char *host_filename);
 
 /**
  * @brief Send execute command to device at given address.

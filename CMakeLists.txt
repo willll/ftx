@@ -51,78 +51,81 @@ if(POLICY CMP0167)
 endif()
 
 find_package(Boost REQUIRED COMPONENTS program_options filesystem)
-find_package(PkgConfig REQUIRED)
+find_package(libftdi1 QUIET)
 
-pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
+if(NOT TARGET libftdi1::libftdi1)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBFTDI1 REQUIRED libftdi1)
 
-if(BUILD_STATIC)
-  set(LIBFTDI1_LINK_LIBS "")
-  set(ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
-  if(WIN32)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib" ".a")
+  if(BUILD_STATIC)
+    set(LIBFTDI1_LINK_LIBS "")
+    set(ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+    if(WIN32)
+      set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib" ".a")
+    else()
+      set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    endif()
+
+    foreach(lib ${LIBFTDI1_STATIC_LIBRARIES})
+      # Try to find the static version of the library
+      find_library(STATIC_LIB_${lib} NAMES ${lib} PATHS ${LIBFTDI1_STATIC_LIBRARY_DIRS})
+      if(STATIC_LIB_${lib})
+        list(APPEND LIBFTDI1_LINK_LIBS ${STATIC_LIB_${lib}})
+      else()
+        # If not found as static, search with original suffixes (allowing dynamic fallback)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ${ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+        find_library(DYNAMIC_LIB_${lib} NAMES ${lib} PATHS ${LIBFTDI1_STATIC_LIBRARY_DIRS})
+        if(DYNAMIC_LIB_${lib})
+          list(APPEND LIBFTDI1_LINK_LIBS ${DYNAMIC_LIB_${lib}})
+        else()
+          list(APPEND LIBFTDI1_LINK_LIBS ${lib})
+        endif()
+        if(WIN32)
+          set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib" ".a")
+        else()
+          set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+        endif()
+      endif()
+    endforeach()
+
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
   else()
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    set(LIBFTDI1_LINK_LIBS ${LIBFTDI1_LIBRARIES})
   endif()
 
-  foreach(lib ${LIBFTDI1_STATIC_LIBRARIES})
-    # Try to find the static version of the library
-    find_library(STATIC_LIB_${lib} NAMES ${lib} PATHS ${LIBFTDI1_STATIC_LIBRARY_DIRS})
-    if(STATIC_LIB_${lib})
-      list(APPEND LIBFTDI1_LINK_LIBS ${STATIC_LIB_${lib}})
+  # Create an interface target wrapping pkg-config results for libftdi1 so we can
+  # link to it in a target-oriented way instead of using raw variables everywhere.
+  add_library(libftdi1_pkgconfig INTERFACE)
+  target_include_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS})
+  target_link_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARY_DIRS})
+  target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LINK_LIBS})
+
+  if(APPLE AND BUILD_STATIC)
+    target_link_libraries(libftdi1_pkgconfig INTERFACE
+      "-framework CoreFoundation"
+      "-framework IOKit"
+      "-framework Security"
+    )
+  endif()
+
+  # When building statically on Linux, libusb may require libudev; add it
+  # to the pkgconfig wrapper so the final link picks it up.
+  if(BUILD_STATIC AND UNIX AND NOT APPLE)
+    find_library(LIBUDEV_LIBRARY NAMES udev)
+    if(LIBUDEV_LIBRARY)
+      if(LIBUDEV_LIBRARY MATCHES "\\.so($|\\.)")
+        message(WARNING "Found only shared libudev (${LIBUDEV_LIBRARY}); cannot statically link it into the binary.")
+        string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
+        message(STATUS "Removed -static from CMAKE_EXE_LINKER_FLAGS; final binary will link libudev dynamically.")
+      endif()
+      # Ensure libudev is linked if not already resolved in LIBFTDI1_LINK_LIBS
+      if(NOT LIBUDEV_LIBRARY IN_LIST LIBFTDI1_LINK_LIBS)
+        target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBUDEV_LIBRARY})
+      endif()
     else()
-      # If not found as static, search with original suffixes (allowing dynamic fallback)
-      set(CMAKE_FIND_LIBRARY_SUFFIXES ${ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
-      find_library(DYNAMIC_LIB_${lib} NAMES ${lib} PATHS ${LIBFTDI1_STATIC_LIBRARY_DIRS})
-      if(DYNAMIC_LIB_${lib})
-        list(APPEND LIBFTDI1_LINK_LIBS ${DYNAMIC_LIB_${lib}})
-      else()
-        list(APPEND LIBFTDI1_LINK_LIBS ${lib})
-      endif()
-      if(WIN32)
-        set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib" ".a")
-      else()
-        set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-      endif()
-    endif()
-  endforeach()
-
-  set(CMAKE_FIND_LIBRARY_SUFFIXES ${ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
-else()
-  set(LIBFTDI1_LINK_LIBS ${LIBFTDI1_LIBRARIES})
-endif()
-
-# Create an interface target wrapping pkg-config results for libftdi1 so we can
-# link to it in a target-oriented way instead of using raw variables everywhere.
-add_library(libftdi1_pkgconfig INTERFACE)
-target_include_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_INCLUDE_DIRS})
-target_link_directories(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LIBRARY_DIRS})
-target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBFTDI1_LINK_LIBS})
-
-if(APPLE AND BUILD_STATIC)
-  target_link_libraries(libftdi1_pkgconfig INTERFACE
-    "-framework CoreFoundation"
-    "-framework IOKit"
-    "-framework Security"
-  )
-endif()
-
-# When building statically on Linux, libusb may require libudev; add it
-# to the pkgconfig wrapper so the final link picks it up.
-if(BUILD_STATIC AND UNIX AND NOT APPLE)
-  find_library(LIBUDEV_LIBRARY NAMES udev)
-  if(LIBUDEV_LIBRARY)
-    if(LIBUDEV_LIBRARY MATCHES "\\.so($|\\.)")
-      message(WARNING "Found only shared libudev (${LIBUDEV_LIBRARY}); cannot statically link it into the binary.")
+      message(WARNING "BUILD_STATIC requested but libudev not found; static link may fail")
       string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
-      message(STATUS "Removed -static from CMAKE_EXE_LINKER_FLAGS; final binary will link libudev dynamically.")
     endif()
-    # Ensure libudev is linked if not already resolved in LIBFTDI1_LINK_LIBS
-    if(NOT LIBUDEV_LIBRARY IN_LIST LIBFTDI1_LINK_LIBS)
-      target_link_libraries(libftdi1_pkgconfig INTERFACE ${LIBUDEV_LIBRARY})
-    endif()
-  else()
-    message(WARNING "BUILD_STATIC requested but libudev not found; static link may fail")
-    string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
   endif()
 endif()
 
@@ -133,6 +136,7 @@ add_executable(ftx
   src/ftdi_discovery.cpp
   src/ftdi_console.cpp
   src/ftdi_gdb.cpp
+  src/ftdi_webdav.cpp
   src/xfer.cpp
   src/crc.cpp
 )
@@ -159,7 +163,11 @@ target_include_directories(ftx
 )
 
 
-target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem libftdi1_pkgconfig)
+if(TARGET libftdi1::libftdi1)
+  target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem libftdi1::libftdi1)
+else()
+  target_link_libraries(ftx PRIVATE Boost::program_options Boost::filesystem libftdi1_pkgconfig)
+endif()
 
 # Use target-based language requirement (modern CMake)
 target_compile_features(ftx PRIVATE cxx_std_17)
