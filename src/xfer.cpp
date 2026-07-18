@@ -938,7 +938,7 @@ namespace xfer
   {
     std::error_code ec;
     uintmax_t file_size_raw = std::filesystem::file_size(host_filename, ec);
-    if (ec || file_size_raw == 0)
+    if (ec)
     {
       std::cerr << "[DoSdUpload] Failed to determine file size: " << ec.message() << std::endl;
       return 0;
