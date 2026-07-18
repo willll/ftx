@@ -27,8 +27,9 @@ This project provides a modern C++17 command-line utility for transferring data 
 
 - C++17 compatible compiler
 - CMake 3.10+
-- Boost (program_options, filesystem)
-- libftdi1
+- Boost libraries (compiled: `program_options`, `filesystem`; header-only: `beast`, `asio`)
+- libftdi1 (with libusb-1.0)
+- Sega Saturn USB flash cartridge (FTDI-based)
 
 ## Building
 
