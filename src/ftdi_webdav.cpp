@@ -3,6 +3,10 @@
  * @brief WebDAV server implementation mapping WebDAV requests to Saturn FAT filesystem.
  */
 
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+
 #include "ftdi.hpp"
 #include "xfer.hpp"
 #include "log.hpp"
