@@ -17,6 +17,8 @@ This project provides a modern C++17 command-line utility for transferring data 
 - Upload and execute a program on the device
 - Execute a program at a specified address
 - Debug console mode for device output
+- WebDAV server mode to mount the cartridge's FAT filesystem as a network drive
+- Raw TCP-to-FTDI proxy server for GDB/debugger integration
 - Command-line interface with argument parsing using Boost.Program_options
 - Modern C++17 codebase with Doxygen documentation
 - FTDI USB communication (libftdi)
@@ -83,7 +85,7 @@ Then configure with `-DBUILD_STATIC=ON` as shown above.
 mkdir -p build
 cd build
 cmake ..
-make
+cmake --build .
 ```
 
 ### macOS (Native Apple Silicon / Intel)
