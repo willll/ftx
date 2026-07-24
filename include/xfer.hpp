@@ -163,6 +163,15 @@ int DoSdUpload(const char *host_filename, const char *saturn_sd_path);
 int DoSdDownload(const char *saturn_sd_path, const char *host_filename);
 
 /**
+ * @brief Synchronize a local directory with a Sega Saturn SD card directory recursively.
+ * @param local_path Local host directory path.
+ * @param saturn_sd_path Target SD card directory path.
+ * @param mode Sync mode: 1 = local to Saturn (default), 2 = Saturn to local, 3 = bidirectional (both).
+ * @return 1 on success, 0 on error.
+ */
+int DoSdSync(const char *local_path, const char *saturn_sd_path, int mode = 1);
+
+/**
  * @brief Send execute command to device at given address.
  * @param address Address to execute.
  * @return 1 on success, 0 on error.

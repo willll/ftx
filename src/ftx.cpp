@@ -141,7 +141,8 @@ void PrintUsage(const char* progName) {
     std::cout << "  --rmdir <path>                Delete a directory\n";
     std::cout << "  --cp <file> <target>          Copy a file to a raw SD range (sdraw:start:count) or FAT filesystem path (/path)\n";
     std::cout << "  --crc <file>                  Print CRC-8 for a file\n";
-    std::cout << "  --lcrc <file>                 Print CRC-8 for a local host file\n\n";
+    std::cout << "  --lcrc <file>                 Print CRC-8 for a local host file\n";
+    std::cout << "  --sync <local> <saturn> [mode] Synchronize local folder and Saturn SDCard folder (mode: 1=local->saturn [default], 2=saturn->local, 3=both)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
     std::cout << "  " << prog << " -u data.bin 0x200000\n";
@@ -168,7 +169,8 @@ struct CommandLineArgs {
     bool webdav = false; ///< Run WebDAV server
     uint16_t webdav_port = 8080; ///< WebDAV port
     int verbose_level = 0; ///< Verbose tracing level (0=none, 1=GDB, 2=all)
-    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC, MKDIR, RMDIR, GET } command = NONE; ///< Command type
+    enum CommandType { NONE, DOWNLOAD, UPLOAD, EXEC, RUN, DUMP, LIST_DEVICES, LS, RM, CRC, CP, LCRC, MKDIR, RMDIR, GET, SYNC } command = NONE; ///< Command type
+    int sync_mode = 1; ///< Sync mode (1 = local->saturn, 2 = saturn->local, 3 = both)
     std::string filename; ///< File name for transfer
     std::string target; ///< Target path for copy operations
     unsigned int address = 0; ///< Address for transfer/execute
@@ -210,6 +212,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
         ("lcrc", po::value<std::string>(), "Print CRC-8 for a local file: <file>")
         ("get", po::value<std::vector<std::string>>()->multitoken(), "Download file from Saturn SD card: <saturn_path> <host_file>")
+        ("sync", po::value<std::vector<std::string>>()->multitoken(), "Synchronize folder: <local_folder> <saturn_folder> [mode: 1=local->saturn, 2=saturn->local, 3=both]")
         ("help,h", "Help: Show this help message")
         ("dump,D", po::value<std::string>(), "Dump BIOS: <file>");
 
@@ -280,6 +283,30 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
                 args.command = CommandLineArgs::GET;
                 args.filename = vals[0];
                 args.target = vals[1];
+            }
+        } else if (vm.count("sync")) {
+            auto vals = vm["sync"].as<std::vector<std::string>>();
+            if (vals.size() >= 2) {
+                args.command = CommandLineArgs::SYNC;
+                args.filename = vals[0];
+                args.target = vals[1];
+                args.sync_mode = 1;
+                if (vals.size() >= 3) {
+                    std::string m = vals[2];
+                    if (m == "1" || m == "local" || m == "push" || m == "local-to-saturn" || m == "to-saturn") {
+                        args.sync_mode = 1;
+                    } else if (m == "2" || m == "saturn" || m == "pull" || m == "saturn-to-local" || m == "to-local") {
+                        args.sync_mode = 2;
+                    } else if (m == "3" || m == "both" || m == "bidirectional" || m == "two-way" || m == "sync") {
+                        args.sync_mode = 3;
+                    } else {
+                        try {
+                            args.sync_mode = std::stoi(m);
+                        } catch (...) {
+                            args.sync_mode = 1;
+                        }
+                    }
+                }
             }
         } else if (vm.count("lcrc")) {
             args.command = CommandLineArgs::LCRC;
@@ -449,6 +476,9 @@ int main(int argc, char *argv[])
                 break;
             case CommandLineArgs::GET:
                 status = xfer::DoSdDownload(args.filename.c_str(), args.target.c_str());
+                break;
+            case CommandLineArgs::SYNC:
+                status = xfer::DoSdSync(args.filename.c_str(), args.target.c_str(), args.sync_mode);
                 break;
             default:
                 break;

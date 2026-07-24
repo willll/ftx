@@ -38,7 +38,9 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -1290,6 +1292,331 @@ namespace xfer
     }
 
     return 1;
+  }
+
+  struct SdSyncEntry {
+    std::string rel_path;
+    bool is_dir = false;
+    uint32_t size = 0;
+    std::string mtime;
+  };
+
+  static std::vector<SdSyncEntry> ListSaturnDirForSync(const std::string &saturn_dir)
+  {
+    std::vector<SdSyncEntry> entries;
+    std::string listing;
+    std::string path_arg = "-l " + saturn_dir;
+    if (xfer::DoListStr(path_arg.c_str(), listing) != 1)
+    {
+      return entries;
+    }
+
+    std::istringstream iss(listing);
+    std::string line;
+    while (std::getline(iss, line))
+    {
+      size_t first = line.find_first_not_of(" \t\r\n");
+      if (first == std::string::npos) continue;
+      line = line.substr(first);
+      if (line.size() < 4) continue;
+
+      bool is_dir = false;
+      if (line.substr(0, 3) == "[D]") is_dir = true;
+      else if (line.substr(0, 3) == "[F]") is_dir = false;
+      else continue;
+
+      std::istringstream line_ss(line.substr(3));
+      uint32_t size = 0;
+      std::string date, time_str, name;
+      if (line_ss >> size >> date >> time_str)
+      {
+        std::getline(line_ss, name);
+        size_t name_start = name.find_first_not_of(" ");
+        if (name_start != std::string::npos) name = name.substr(name_start);
+        if (!name.empty() && name.back() == '\r') name.pop_back();
+        if (name == "." || name == "..") continue;
+
+        SdSyncEntry entry;
+        entry.rel_path = name;
+        entry.is_dir = is_dir;
+        entry.size = size;
+        entry.mtime = date + " " + time_str;
+        entries.push_back(entry);
+      }
+    }
+    return entries;
+  }
+
+  static void GetSaturnTreeRecursive(const std::string &saturn_base, const std::string &current_rel, std::vector<SdSyncEntry> &out_list)
+  {
+    std::string current_saturn = saturn_base;
+    if (!current_rel.empty())
+    {
+      if (current_saturn.back() != '/') current_saturn += '/';
+      current_saturn += current_rel;
+    }
+
+    auto items = ListSaturnDirForSync(current_saturn);
+    for (const auto &item : items)
+    {
+      std::string rel = current_rel.empty() ? item.rel_path : (current_rel + "/" + item.rel_path);
+      SdSyncEntry node;
+      node.rel_path = rel;
+      node.is_dir = item.is_dir;
+      node.size = item.size;
+      node.mtime = item.mtime;
+      out_list.push_back(node);
+
+      if (item.is_dir)
+      {
+        GetSaturnTreeRecursive(saturn_base, rel, out_list);
+      }
+    }
+  }
+
+  static void GetLocalTreeRecursive(const std::filesystem::path &local_base, const std::string &current_rel, std::vector<SdSyncEntry> &out_list)
+  {
+    std::filesystem::path current_local = local_base;
+    if (!current_rel.empty())
+    {
+      current_local /= current_rel;
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::exists(current_local, ec)) return;
+
+    for (const auto &entry : std::filesystem::directory_iterator(current_local, ec))
+    {
+      std::string name = entry.path().filename().string();
+      std::string rel = current_rel.empty() ? name : (current_rel + "/" + name);
+      SdSyncEntry node;
+      node.rel_path = rel;
+      node.is_dir = entry.is_directory(ec);
+      if (!node.is_dir)
+      {
+        node.size = static_cast<uint32_t>(entry.file_size(ec));
+      }
+      out_list.push_back(node);
+
+      if (node.is_dir)
+      {
+        GetLocalTreeRecursive(local_base, rel, out_list);
+      }
+    }
+  }
+
+  static std::string CombineSaturnPath(const std::string &base, const std::string &rel)
+  {
+    if (base == "/") return "/" + rel;
+    if (!base.empty() && base.back() == '/') return base + rel;
+    return base + "/" + rel;
+  }
+
+  int DoSdSync(const char *local_path, const char *saturn_sd_path, int mode)
+  {
+    if (!local_path || !saturn_sd_path)
+    {
+      std::cerr << "[DoSdSync] Missing local or Saturn SD path." << std::endl;
+      return 0;
+    }
+
+    std::string saturn_base = saturn_sd_path;
+    if (saturn_base.empty() || saturn_base[0] != '/')
+    {
+      saturn_base = "/" + saturn_base;
+    }
+    if (saturn_base.size() > 1 && saturn_base.back() == '/')
+    {
+      saturn_base.pop_back();
+    }
+
+    std::filesystem::path local_base(local_path);
+    std::error_code ec;
+
+    std::cout << "[DoSdSync] Synchronizing (Mode " << mode << "): '"
+              << local_base.string() << "' <-> Saturn:'" << saturn_base << "'" << std::endl;
+
+    if (mode == 1)
+    {
+      // Mode 1: Copy local -> Saturn SD (default)
+      if (!std::filesystem::exists(local_base, ec))
+      {
+        std::cerr << "[DoSdSync] Local directory does not exist: " << local_base << std::endl;
+        return 0;
+      }
+
+      std::vector<SdSyncEntry> local_items;
+      GetLocalTreeRecursive(local_base, "", local_items);
+
+      // Create base folder on Saturn SD
+      xfer::DoMkdir(saturn_base.c_str());
+
+      // Create all directories first
+      for (const auto &item : local_items)
+      {
+        if (item.is_dir)
+        {
+          std::string target_saturn = CombineSaturnPath(saturn_base, item.rel_path);
+          xfer::DoMkdir(target_saturn.c_str());
+        }
+      }
+
+      // Copy all files
+      int success_count = 0;
+      int fail_count = 0;
+      for (const auto &item : local_items)
+      {
+        if (!item.is_dir)
+        {
+          std::filesystem::path src = local_base / item.rel_path;
+          std::string target_saturn = CombineSaturnPath(saturn_base, item.rel_path);
+          std::cout << "[DoSdSync] Uploading " << item.rel_path << " -> " << target_saturn << std::endl;
+          if (xfer::DoSdUpload(src.string().c_str(), target_saturn.c_str()) == 1)
+          {
+            success_count++;
+          }
+          else
+          {
+            fail_count++;
+          }
+        }
+      }
+      std::cout << "[DoSdSync] Upload sync complete. " << success_count << " succeeded, " << fail_count << " failed." << std::endl;
+      return (fail_count == 0) ? 1 : 0;
+    }
+    else if (mode == 2)
+    {
+      // Mode 2: Copy Saturn SD -> local
+      std::filesystem::create_directories(local_base, ec);
+
+      std::vector<SdSyncEntry> saturn_items;
+      GetSaturnTreeRecursive(saturn_base, "", saturn_items);
+
+      // Create all local directories first
+      for (const auto &item : saturn_items)
+      {
+        if (item.is_dir)
+        {
+          std::filesystem::path target_local = local_base / item.rel_path;
+          std::filesystem::create_directories(target_local, ec);
+        }
+      }
+
+      // Download all files
+      int success_count = 0;
+      int fail_count = 0;
+      for (const auto &item : saturn_items)
+      {
+        if (!item.is_dir)
+        {
+          std::string src_saturn = CombineSaturnPath(saturn_base, item.rel_path);
+          std::filesystem::path target_local = local_base / item.rel_path;
+          std::cout << "[DoSdSync] Downloading " << src_saturn << " -> " << target_local.string() << std::endl;
+          if (xfer::DoSdDownload(src_saturn.c_str(), target_local.string().c_str()) == 1)
+          {
+            success_count++;
+          }
+          else
+          {
+            fail_count++;
+          }
+        }
+      }
+      std::cout << "[DoSdSync] Download sync complete. " << success_count << " succeeded, " << fail_count << " failed." << std::endl;
+      return (fail_count == 0) ? 1 : 0;
+    }
+    else if (mode == 3)
+    {
+      // Mode 3: Synchronize both folders recursively (bidirectional)
+      std::filesystem::create_directories(local_base, ec);
+
+      std::vector<SdSyncEntry> local_items;
+      GetLocalTreeRecursive(local_base, "", local_items);
+
+      std::vector<SdSyncEntry> saturn_items;
+      GetSaturnTreeRecursive(saturn_base, "", saturn_items);
+
+      std::map<std::string, SdSyncEntry> local_map;
+      for (const auto &it : local_items) local_map[it.rel_path] = it;
+
+      std::map<std::string, SdSyncEntry> saturn_map;
+      for (const auto &it : saturn_items) saturn_map[it.rel_path] = it;
+
+      std::set<std::string> all_paths;
+      for (const auto &it : local_items) all_paths.insert(it.rel_path);
+      for (const auto &it : saturn_items) all_paths.insert(it.rel_path);
+
+      xfer::DoMkdir(saturn_base.c_str());
+
+      int success_count = 0;
+      int fail_count = 0;
+
+      for (const auto &rel : all_paths)
+      {
+        bool in_local = local_map.count(rel) > 0;
+        bool in_saturn = saturn_map.count(rel) > 0;
+
+        if (in_local && in_saturn)
+        {
+          const auto &loc = local_map[rel];
+          const auto &sat = saturn_map[rel];
+          if (loc.is_dir && sat.is_dir)
+          {
+            continue;
+          }
+          else if (!loc.is_dir && !sat.is_dir)
+          {
+            // Both are files. If size differs, update from local to Saturn
+            if (loc.size != sat.size)
+            {
+              std::cout << "[DoSdSync] File size mismatch for " << rel << " (Local: " << loc.size << ", Saturn: " << sat.size << "). Updating Saturn." << std::endl;
+              std::filesystem::path src_local = local_base / rel;
+              std::string dst_saturn = CombineSaturnPath(saturn_base, rel);
+              if (xfer::DoSdUpload(src_local.string().c_str(), dst_saturn.c_str()) == 1) success_count++;
+              else fail_count++;
+            }
+          }
+        }
+        else if (in_local && !in_saturn)
+        {
+          const auto &loc = local_map[rel];
+          std::string dst_saturn = CombineSaturnPath(saturn_base, rel);
+          if (loc.is_dir)
+          {
+            xfer::DoMkdir(dst_saturn.c_str());
+          }
+          else
+          {
+            std::filesystem::path src_local = local_base / rel;
+            std::cout << "[DoSdSync] Uploading missing file to Saturn: " << rel << std::endl;
+            if (xfer::DoSdUpload(src_local.string().c_str(), dst_saturn.c_str()) == 1) success_count++;
+            else fail_count++;
+          }
+        }
+        else if (!in_local && in_saturn)
+        {
+          const auto &sat = saturn_map[rel];
+          std::filesystem::path dst_local = local_base / rel;
+          std::string src_saturn = CombineSaturnPath(saturn_base, rel);
+          if (sat.is_dir)
+          {
+            std::filesystem::create_directories(dst_local, ec);
+          }
+          else
+          {
+            std::cout << "[DoSdSync] Downloading missing file to local: " << rel << std::endl;
+            if (xfer::DoSdDownload(src_saturn.c_str(), dst_local.string().c_str()) == 1) success_count++;
+            else fail_count++;
+          }
+        }
+      }
+
+      std::cout << "[DoSdSync] Bidirectional sync complete. " << success_count << " operations succeeded, " << fail_count << " failed." << std::endl;
+      return (fail_count == 0) ? 1 : 0;
+    }
+
+    std::cerr << "[DoSdSync] Invalid sync mode: " << mode << std::endl;
+    return 0;
   }
 
 } // namespace xfer
