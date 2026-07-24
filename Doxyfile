@@ -63,3 +63,5 @@ INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = NDEBUG \
                          FTX_DEBUG_BUILD
 
+HAVE_DOT               = NO
+

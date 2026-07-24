@@ -7,6 +7,7 @@
  * a Sega Saturn USB flash cartridge. It provides:
  *
  * - **Data Transfer**: Download, upload, and execute binaries on the device
+ * - **Directory Synchronization**: Recursive push, pull, and bidirectional sync for SD cards
  * - **Debug Console**: Interactive console mode for device communication
  * - **TCP Proxy**: Raw TCP↔FTDI bridge for debugger integration
  * - **Robust Error Handling**: Automatic recovery, retry logic, and comprehensive traces
@@ -15,6 +16,7 @@
  *
  * - C++17 modern codebase with comprehensive error handling
  * - Cross-platform support (Linux, Windows, macOS via CMake)
+ * - Recursive folder synchronization with 3 operating modes
  * - Adaptive USB write retry with chunk size backoff
  * - Deduplicating debug logger with compile-time control
  * - Extensive Doxygen documentation
@@ -22,7 +24,7 @@
  *
  * @section quickstart Quick Start
  *
- * ### Building
+ * @subsection quickstart_building Building
  *
  * **Debug build** (with full traces):
  * @code
@@ -36,7 +38,7 @@
  * cmake --build .
  * @endcode
  *
- * ### Usage
+ * @subsection quickstart_usage Usage
  *
  * **Debug console mode**:
  * @code
@@ -55,9 +57,16 @@
  * ./ftx -x prog.bin 0x200000            # Upload and execute
  * @endcode
  *
+ * **Directory synchronization**:
+ * @code
+ * ./ftx --sync ./my_assets /SD_TEST/ASSETS       # Mode 1: Push local -> Saturn
+ * ./ftx --sync ./backup /SD_TEST/ASSETS 2        # Mode 2: Pull Saturn -> local
+ * ./ftx --sync ./my_assets /SD_TEST/ASSETS 3     # Mode 3: Bidirectional sync
+ * @endcode
+ *
  * @section architecture Architecture
  *
- * ### Core Modules
+ * @subsection arch_modules Core Modules
  *
  * - **ftdi** (@ref ftdi.hpp): Main FTDI device communication interface
  *   - Device initialization and lifecycle management
@@ -77,7 +86,7 @@
  *   - Lookup-table based for efficiency
  *   - Used in Saturn cartridge protocols
  *
- * ### Build Modes
+ * @subsection arch_modes Build Modes
  *
  * - **Debug** (`-DCMAKE_BUILD_TYPE=Debug`): Full traces, no optimization
  * - **Release** (`-DCMAKE_BUILD_TYPE=Release`): Traces compiled out via `NDEBUG`
@@ -94,7 +103,7 @@
  *
  * @section debugging Debug Features
  *
- * ### Deduplicating Logger
+ * @subsection debug_logger Deduplicating Logger
  *
  * The @ref Logging "debug logging system" provides:
  *
@@ -102,14 +111,15 @@
  * - `CDBG_LOG_ON_CHANGE(KEY, message)` for spam reduction
  * - Automatic thread-safe deduplication
  *
- * ### Trace Categories
+ * @subsection debug_categories Trace Categories
  *
  * - `[InitComms][dbg]`: Device initialization
  * - `[DoConsole][dbg]`: Console I/O and threading
- * - `[TCPProxy][dbg]`: TCP proxy lifecycle, I/O counts, retry attempts\n *
+ * - `[TCPProxy][dbg]`: TCP proxy lifecycle, I/O counts, retry attempts
+ *
  * @section examples Examples
  *
- * ### Console Debug Session
+ * @subsection ex_console Console Debug Session
  *
  * @code
  * ./ftx -c
@@ -117,17 +127,19 @@
  * # Type commands here, device output appears below
  * @endcode
  *
- * ### GDB Integration via TCP Proxy
+ * @subsection ex_gdb GDB Integration via TCP Proxy
  *
  * Terminal 1 (start proxy with tracing):
  * @code
  * ./ftx -g 1234 -verbose
- * [TCPProxy] listening on port 1234\n * @endcode
+ * [TCPProxy] listening on port 1234
+ * @endcode
  *
  * Terminal 2 (connect GDB):
  * @code
  * gdb-multiarch
- * (gdb) target remote localhost:1234\n * (gdb) # GDB RSP packets are now traced in terminal 1
+ * (gdb) target remote localhost:1234
+ * (gdb) # GDB RSP packets are now traced in terminal 1
  * @endcode
  *
  * @section contributing Contributing

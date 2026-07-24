@@ -18,6 +18,7 @@ This project provides a modern C++17 command-line utility for transferring data 
 - Execute a program at a specified address
 - Debug console mode for device output
 - WebDAV server mode to mount the cartridge's FAT filesystem as a network drive
+- Recursive directory synchronization (unidirectional push, unidirectional pull, and bidirectional)
 - Raw TCP-to-FTDI proxy server for GDB/debugger integration
 - Command-line interface with argument parsing using Boost.Program_options
 - Modern C++17 codebase with Doxygen documentation
@@ -152,6 +153,7 @@ To install the WinUSB driver:
 - `--cp <file> <target>`     : Copy a file to the target. `<target>` can be a FAT path (e.g., `/folder/file.bin`) or raw SD sectors (`sdraw:start:count`).
 - `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target
 - `--lcrc <file>`            : Calculate and print the CRC-8 checksum for a local host file
+- `--sync <local> <saturn> [mode]`: Synchronize a local directory with a Sega Saturn SD card directory recursively (`mode`: `1`=local->saturn [default], `2`=saturn->local, `3`=both).
 
 ### Examples
 
@@ -207,6 +209,24 @@ Copy a file to the FAT filesystem on the target:
 
 ```sh
 ./ftx --cp data.bin /test_folder/data.bin
+```
+
+Synchronize local folder to Saturn SD card (Mode 1: push):
+
+```sh
+./ftx --sync ./my_assets /SD_TEST/ASSETS
+```
+
+Synchronize Saturn SD card folder to local host (Mode 2: pull):
+
+```sh
+./ftx --sync ./backup /SD_TEST/ASSETS 2
+```
+
+Bidirectional recursive folder synchronization (Mode 3: both):
+
+```sh
+./ftx --sync ./my_assets /SD_TEST/ASSETS 3
 ```
 
 ## TCP Proxy Mode
@@ -428,6 +448,7 @@ Core public API:
 - **ftdi::DoConsole()** — Interactive debug console
 - **ftdi::DoTcpProxy()** — TCP↔FTDI proxy server
 - **xfer::Download()**, **xfer::Upload()**, **xfer::Execute()** — Data transfer
+- **xfer::DoSdSync()** — Recursive directory synchronization (push, pull, bidirectional)
 
 Internal helper functions (TCP proxy implementation):
 
