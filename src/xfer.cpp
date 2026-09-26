@@ -1301,7 +1301,8 @@ namespace xfer
   struct SdSyncEntry {
     std::string rel_path;
     bool is_dir = false;
-    uintmax_t size = 0;
+    uint32_t size = 0;
+    bool too_large = false; ///< Local file exceeds the FAT32 4 GB limit.
     std::time_t mtime = -1; ///< Modification time (local time zone), -1 if unknown.
   };
 
@@ -1390,7 +1391,7 @@ namespace xfer
       else continue;
 
       std::istringstream line_ss(line.substr(3));
-      uintmax_t size = 0;
+      uint32_t size = 0;
       std::string date, time_str, name;
       if (line_ss >> size >> date >> time_str)
       {
@@ -1509,12 +1510,14 @@ namespace xfer
       node.is_dir = fs::is_directory(st);
       if (!node.is_dir)
       {
-        node.size = entry.file_size(ec);
+        const uintmax_t size = entry.file_size(ec);
         if (ec)
         {
           std::cerr << "[DoSdSync] Cannot read size of " << entry.path() << ": " << ec.message() << std::endl;
           return false;
         }
+        node.too_large = size > std::numeric_limits<uint32_t>::max();
+        node.size = node.too_large ? 0 : static_cast<uint32_t>(size);
         auto ftime = entry.last_write_time(ec);
         node.mtime = ec ? -1 : ToTimeT(ftime);
         ec.clear();
@@ -1693,6 +1696,16 @@ namespace xfer
       auto sat_it = saturn_map.find(key);
       const bool in_local = loc_it != local_map.end();
       const bool in_saturn = sat_it != saturn_map.end();
+
+      // FAT32 cannot hold files of 4 GB or more: never push them, and in mode 3
+      // never let a same-named Saturn file overwrite them either.
+      if (in_local && loc_it->second.too_large && push)
+      {
+        std::cerr << "[DoSdSync] Skipping " << loc_it->second.rel_path
+                  << ": larger than the 4 GB FAT32 limit." << std::endl;
+        fail_count++;
+        continue;
+      }
 
       if (in_local && !in_saturn)
       {
