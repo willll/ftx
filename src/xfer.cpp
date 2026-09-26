@@ -1303,6 +1303,7 @@ namespace xfer
     bool is_dir = false;
     uint32_t size = 0;
     bool too_large = false; ///< Local file exceeds the FAT32 4 GB limit.
+    std::string problem;    ///< Non-empty: local entry that must never be synced (reason).
     std::time_t mtime = -1; ///< Modification time (local time zone), -1 if unknown.
   };
 
@@ -1447,6 +1448,36 @@ namespace xfer
     return true;
   }
 
+  /// Create a Saturn directory and any missing parents (like mkdir -p).
+  static bool MakeSaturnDirs(const std::string &saturn_path)
+  {
+    bool parent_missing = false;
+    for (size_t pos = saturn_path.find('/', 1); ; pos = saturn_path.find('/', pos + 1))
+    {
+      const std::string prefix = saturn_path.substr(0, pos);
+      if (!parent_missing)
+      {
+        bool found = false, is_dir = false;
+        if (!LookupSaturnPath(prefix, found, is_dir))
+        {
+          return false;
+        }
+        if (found && !is_dir)
+        {
+          std::cerr << "[DoSdSync] Saturn path is not a directory: " << prefix << std::endl;
+          return false;
+        }
+        parent_missing = !found;
+      }
+      if (parent_missing && xfer::DoMkdir(prefix.c_str()) != 1)
+      {
+        std::cerr << "[DoSdSync] Cannot create Saturn directory: " << prefix << std::endl;
+        return false;
+      }
+      if (pos == std::string::npos) return true;
+    }
+  }
+
   static bool GetSaturnTreeRecursive(const std::string &saturn_base, const std::string &current_rel, SdSyncMap &out)
   {
     std::vector<SdSyncEntry> items;
@@ -1487,28 +1518,30 @@ namespace xfer
       std::string name = entry.path().filename().string();
       std::string rel = current_rel.empty() ? name : (current_rel + "/" + name);
 
-      // Resolve symlinks, but never descend into a symlinked directory (loop risk).
+      SdSyncEntry node;
+      node.rel_path = rel;
+
+      // Entries that cannot be synced safely stay in the tree, flagged, so that
+      // a same-named Saturn entry is never written through or over them.
       fs::file_status st = entry.status(ec);
       if (ec)
       {
-        std::cerr << "[DoSdSync] Cannot stat " << entry.path() << ": " << ec.message() << std::endl;
-        return false;
+        const std::string reason = ec.message();
+        ec.clear();
+        node.problem = entry.is_symlink(ec) ? "broken symlink" : "cannot stat (" + reason + ")";
       }
-      if (entry.is_symlink(ec) && fs::is_directory(st))
+      else if (entry.is_symlink(ec) && fs::is_directory(st))
       {
-        std::cerr << "[DoSdSync] Skipping symlinked directory: " << entry.path() << std::endl;
-        continue;
+        node.problem = "symlinked directory";
       }
-      if (!fs::is_directory(st) && !fs::is_regular_file(st))
+      else if (!fs::is_directory(st) && !fs::is_regular_file(st))
       {
-        std::cerr << "[DoSdSync] Skipping special file: " << entry.path() << std::endl;
-        continue;
+        node.problem = "not a regular file or directory";
       }
+      ec.clear();
 
-      SdSyncEntry node;
-      node.rel_path = rel;
-      node.is_dir = fs::is_directory(st);
-      if (!node.is_dir)
+      node.is_dir = node.problem.empty() && fs::is_directory(st);
+      if (node.problem.empty() && !node.is_dir)
       {
         const uintmax_t size = entry.file_size(ec);
         if (ec)
@@ -1522,7 +1555,16 @@ namespace xfer
         node.mtime = ec ? -1 : ToTimeT(ftime);
         ec.clear();
       }
-      out[SyncKey(rel)] = node;
+
+      // FAT is case-insensitive: two local names differing only in case can't both be synced.
+      const std::string key = SyncKey(rel);
+      auto existing = out.find(key);
+      if (existing != out.end())
+      {
+        existing->second.problem = "name differs only in case from " + rel;
+        continue;
+      }
+      out[key] = node;
 
       if (node.is_dir && !GetLocalTreeRecursive(local_base, rel, out))
       {
@@ -1635,9 +1677,8 @@ namespace xfer
         return 0;
       }
     }
-    if (!saturn_exists && xfer::DoMkdir(saturn_base.c_str()) != 1)
+    if (!saturn_exists && !MakeSaturnDirs(saturn_base))
     {
-      std::cerr << "[DoSdSync] Cannot create Saturn directory: " << saturn_base << std::endl;
       return 0;
     }
 
@@ -1699,6 +1740,18 @@ namespace xfer
 
       // FAT32 cannot hold files of 4 GB or more: never push them, and in mode 3
       // never let a same-named Saturn file overwrite them either.
+      if (in_local && !loc_it->second.problem.empty())
+      {
+        // Local-only entries in pull mode need no action, so aren't a failure.
+        if (push || in_saturn)
+        {
+          std::cerr << "[DoSdSync] Skipping " << loc_it->second.rel_path << ": "
+                    << loc_it->second.problem << "." << std::endl;
+          fail_count++;
+        }
+        blocked.insert(key);
+        continue;
+      }
       if (in_local && loc_it->second.too_large && push)
       {
         std::cerr << "[DoSdSync] Skipping " << loc_it->second.rel_path
