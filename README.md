@@ -157,7 +157,7 @@ To install the WinUSB driver:
   - Modes 1 and 2 copy every file from the source side, overwriting the destination.
   - Mode 3 copies files that exist on only one side. When a file exists on both sides with a different size, the more recently modified copy wins; if the timestamps can't decide (same minute or unknown), the file is reported as a conflict and left alone. Files of equal size are assumed identical.
   - No mode ever deletes files. Paths are matched case-insensitively, like FAT. Unknown `mode` values are rejected.
-  - Local entries that can't be synced safely are reported and left alone on both sides: files of 4 GB or more (FAT32 limit), symlinked directories, broken symlinks, special files, and names that differ only in case. A missing Saturn base folder is created along with its parents.
+  - Local entries that can't be synced safely are reported and left alone on both sides: files of 4 GB or more (FAT32 limit), symlinked directories, broken symlinks, special files, and names that differ only in case. Symlinks to files are followed when pushing, but a pull never overwrites them (it would write to the link's target). A missing Saturn base folder is created along with its parents.
 
 ### Examples
 

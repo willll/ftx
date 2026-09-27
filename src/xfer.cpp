@@ -1304,6 +1304,7 @@ namespace xfer
     uint32_t size = 0;
     bool too_large = false; ///< Local file exceeds the FAT32 4 GB limit.
     std::string problem;    ///< Non-empty: local entry that must never be synced (reason).
+    bool is_symlink = false; ///< Local file reached through a symlink (pushed, never overwritten).
     std::time_t mtime = -1; ///< Modification time (local time zone), -1 if unknown.
   };
 
@@ -1530,9 +1531,11 @@ namespace xfer
         ec.clear();
         node.problem = entry.is_symlink(ec) ? "broken symlink" : "cannot stat (" + reason + ")";
       }
-      else if (entry.is_symlink(ec) && fs::is_directory(st))
+      else if (entry.is_symlink(ec))
       {
-        node.problem = "symlinked directory";
+        if (fs::is_directory(st)) node.problem = "symlinked directory";
+        else if (!fs::is_regular_file(st)) node.problem = "not a regular file or directory";
+        else node.is_symlink = true;
       }
       else if (!fs::is_directory(st) && !fs::is_regular_file(st))
       {
@@ -1714,6 +1717,18 @@ namespace xfer
       else fail_count++;
     };
 
+    // Downloading over a local symlink would write to its target, possibly outside the tree.
+    auto download_over = [&](const SdSyncEntry &sat, const SdSyncEntry &loc) {
+      if (loc.is_symlink)
+      {
+        std::cerr << "[DoSdSync] Skipping " << loc.rel_path
+                  << ": local file is a symlink; not overwriting its target." << std::endl;
+        fail_count++;
+        return;
+      }
+      download(sat, loc.rel_path);
+    };
+
     std::set<std::string> all_keys;
     for (const auto &kv : local_map) all_keys.insert(kv.first);
     for (const auto &kv : saturn_map) all_keys.insert(kv.first);
@@ -1829,7 +1844,7 @@ namespace xfer
         }
         else if (mode == 2)
         {
-          download(sat, loc.rel_path);
+          download_over(sat, loc);
         }
         else if (loc.size != sat.size)
         {
@@ -1849,7 +1864,7 @@ namespace xfer
           else
           {
             std::cout << "[DoSdSync] Saturn copy of " << sat.rel_path << " is newer." << std::endl;
-            download(sat, loc.rel_path);
+            download_over(sat, loc);
           }
         }
         else
