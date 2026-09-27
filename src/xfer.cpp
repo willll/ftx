@@ -1738,8 +1738,7 @@ namespace xfer
       const bool in_local = loc_it != local_map.end();
       const bool in_saturn = sat_it != saturn_map.end();
 
-      // FAT32 cannot hold files of 4 GB or more: never push them, and in mode 3
-      // never let a same-named Saturn file overwrite them either.
+      // Flagged local entries are never synced in either direction.
       if (in_local && !loc_it->second.problem.empty())
       {
         // Local-only entries in pull mode need no action, so aren't a failure.
@@ -1752,6 +1751,8 @@ namespace xfer
         blocked.insert(key);
         continue;
       }
+      // FAT32 cannot hold files of 4 GB or more: never push them, and in mode 3
+      // never let a same-named Saturn file overwrite them either.
       if (in_local && loc_it->second.too_large && push)
       {
         std::cerr << "[DoSdSync] Skipping " << loc_it->second.rel_path
