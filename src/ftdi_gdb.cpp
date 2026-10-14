@@ -295,10 +295,10 @@ int DoTcpProxy(uint16_t port, bool verbose)
 
     unsigned char socket_rx[2048];
     unsigned char ftdi_rx[2048];
-    std::string gdb_trace_buffer;
-    std::string target_trace_buffer;
+    // A failed FTDI transfer means a dead handle (e.g. after usbreset); exiting lets callers restart us.
+    bool device_failed = false;
 
-    while (!g_interrupt_flag)
+    while (!g_interrupt_flag && !device_failed)
     {
         struct pollfd accept_poll;
         accept_poll.fd = listen_fd;
@@ -336,7 +336,16 @@ int DoTcpProxy(uint16_t port, bool verbose)
         std::cout << "[TCPProxy] client connected" << std::endl;
         cdbg << "[TCPProxy][dbg] client_fd=" << client_fd << std::endl;
 
-        bool client_alive = true;
+        // Drop target output left over from the previous client so it can't be mistaken for a reply.
+        if (ftdi_tciflush(&g_Device) < 0)
+        {
+            std::cerr << "[TCPProxy] FTDI flush failed: " << ftdi_get_error_string(&g_Device) << std::endl;
+            device_failed = true;
+        }
+        std::string gdb_trace_buffer;
+        std::string target_trace_buffer;
+
+        bool client_alive = !device_failed;
         while (client_alive && !g_interrupt_flag)
         {
             struct pollfd client_poll;
@@ -384,6 +393,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
                                       << bytes_forwarded << "/" << recv_len
                                       << " bytes: " << ftdi_get_error_string(&g_Device) << std::endl;
                             client_alive = false;
+                            device_failed = true;
                         }
                         else
                         {
@@ -399,6 +409,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
             {
                 std::cerr << "[TCPProxy] FTDI read failed: " << ftdi_get_error_string(&g_Device) << std::endl;
                 client_alive = false;
+                device_failed = true;
                 break;
             }
 
@@ -422,7 +433,7 @@ int DoTcpProxy(uint16_t port, bool verbose)
     socket_close(listen_fd);
     std::cout << "[TCPProxy] stopped" << std::endl;
     cdbg << "[TCPProxy][dbg] listen_fd closed" << std::endl;
-    return 0;
+    return device_failed ? 1 : 0;
 }
 
 } // namespace ftdi
