@@ -95,7 +95,7 @@ void DoConsole(bool enable_stdin, bool acknowledge = false);
  * @brief Start a raw TCP proxy that forwards bytes between TCP and FTDI.
  * @param port TCP port to listen on (default 1234).
  * @param verbose If true, prints traced RSP commands with GDB>/Target> prefixes.
- * @return Exit status code.
+ * @return Exit status code: 0 on interrupt, 1 on setup error or when the FTDI device stops responding.
  */
 int DoTcpProxy(uint16_t port = 1234, bool verbose = false);
 
