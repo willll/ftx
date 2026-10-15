@@ -286,26 +286,25 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
             }
         } else if (vm.count("sync")) {
             auto vals = vm["sync"].as<std::vector<std::string>>();
-            if (vals.size() >= 2) {
-                args.command = CommandLineArgs::SYNC;
-                args.filename = vals[0];
-                args.target = vals[1];
-                args.sync_mode = 1;
-                if (vals.size() >= 3) {
-                    std::string m = vals[2];
-                    if (m == "1" || m == "local" || m == "push" || m == "local-to-saturn" || m == "to-saturn") {
-                        args.sync_mode = 1;
-                    } else if (m == "2" || m == "saturn" || m == "pull" || m == "saturn-to-local" || m == "to-local") {
-                        args.sync_mode = 2;
-                    } else if (m == "3" || m == "both" || m == "bidirectional" || m == "two-way" || m == "sync") {
-                        args.sync_mode = 3;
-                    } else {
-                        try {
-                            args.sync_mode = std::stoi(m);
-                        } catch (...) {
-                            args.sync_mode = 1;
-                        }
-                    }
+            if (vals.size() < 2 || vals.size() > 3) {
+                std::cerr << "--sync expects <local> <saturn> [mode]" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            args.command = CommandLineArgs::SYNC;
+            args.filename = vals[0];
+            args.target = vals[1];
+            args.sync_mode = 1;
+            if (vals.size() == 3) {
+                const std::string& m = vals[2];
+                if (m == "1" || m == "local" || m == "push" || m == "local-to-saturn" || m == "to-saturn") {
+                    args.sync_mode = 1;
+                } else if (m == "2" || m == "saturn" || m == "pull" || m == "saturn-to-local" || m == "to-local") {
+                    args.sync_mode = 2;
+                } else if (m == "3" || m == "both" || m == "bidirectional" || m == "two-way" || m == "sync") {
+                    args.sync_mode = 3;
+                } else {
+                    std::cerr << "Invalid sync mode '" << m << "' (expected 1/push, 2/pull or 3/both)" << std::endl;
+                    exit(EXIT_FAILURE);
                 }
             }
         } else if (vm.count("lcrc")) {
