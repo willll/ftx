@@ -98,7 +98,7 @@ bool write_all_socket(int fd, const unsigned char* data, size_t len)
  * @return true if all bytes were sent, false if write failed.
  * @note On partial failure, `written_out` contains bytes successfully written.
  * @note Generates debug traces prefixed with `[TCPProxy][dbg]`.
- * @note Calls ftdi_tcioflush() and usleep() on retries.
+ * @note Calls ftdi_tcoflush() and usleep() on retries.
  */
 bool write_all_ftdi(struct ftdi_context* dev, const unsigned char* data, size_t len, size_t* written_out)
 {
@@ -136,7 +136,7 @@ bool write_all_ftdi(struct ftdi_context* dev, const unsigned char* data, size_t 
                 cdbg << "[TCPProxy][dbg] ftdi write failed attempt=" << (attempt + 1)
                      << "/" << kMaxWriteRetries << " err='" << ftdi_get_error_string(dev)
                      << "', flushing and retrying" << std::endl;
-                (void)ftdi_tcioflush(dev);
+                (void)ftdi_tcoflush(dev); // TX only: RX may hold a reply GDB still needs
                 usleep(kRetryDelayUs);
             }
         }
