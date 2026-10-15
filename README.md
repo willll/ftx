@@ -157,6 +157,7 @@ To install the WinUSB driver:
   - Modes 1 and 2 copy every file from the source side, overwriting the destination.
   - Mode 3 copies files that exist on only one side. When a file exists on both sides and differs (different size, or same size but different CRC-8), the more recently modified copy wins; if the timestamps can't decide (same minute or unknown), the file is reported as a conflict and left alone, and mode 1 or 2 picks a side. The Saturn has no clock (SRL_HostIO stamps every file it writes 2018-01-01 00:00), so a file last written by the Saturn always has an unknown time. Before mode 3 replaces a local file it keeps the old one as `<name>.ftxbak`.
   - Downloads are written to `<name>.ftxpart` and only replace `<name>` once the checksum matches, so a failed transfer never damages an existing file. Local `*.ftxpart` and `*.ftxbak` files are never synced.
+  - SRL_HostIO's folder listing holds only about 20 entries and is cut off silently beyond that. ftx detects this and stops the sync (and fails the WebDAV request) instead of acting on a partial folder.
   - No mode ever deletes files. Paths are matched case-insensitively, like FAT. Unknown `mode` values are rejected.
   - Local entries that can't be synced safely are reported and left alone on both sides: files of 4 GB or more (FAT32 limit), symlinked directories, broken symlinks, special files, and names that differ only in case. Symlinks to files are followed when pushing, but a pull never overwrites them (it would write to the link's target). A missing Saturn base folder is created along with its parents.
 
@@ -277,7 +278,7 @@ When `-v` or `-vv` is enabled, traced packet lines are printed with one packet p
 
 ## WebDAV Server Mode
 
-`-wd` starts a WebDAV server that exposes the target's FAT filesystem over the HTTP protocol. This allows you to mount the Sega Saturn USB cartridge as a network drive in Windows Explorer, macOS Finder, or Linux Nautilus to browse directories and transfer files.
+`-wd` starts a WebDAV server that exposes the target's FAT filesystem over the HTTP protocol. It has no authentication, so it only listens on `127.0.0.1` (this machine). This allows you to mount the Sega Saturn USB cartridge as a network drive in Windows Explorer, macOS Finder, or Linux Nautilus to browse directories and transfer files.
 
 Start the WebDAV server on the default port (8080):
 
