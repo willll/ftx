@@ -1194,8 +1194,13 @@ namespace xfer
     return (result == 0x00) ? 1 : 0;
   }
 
+  /// Temporary suffix for downloads in progress; the file only gets its real name once verified.
+  static const char kDownloadPartSuffix[] = ".ftxpart";
+  /// Suffix of the local copy kept when a bidirectional sync replaces a local file.
+  static const char kSyncBackupSuffix[] = ".ftxbak";
+
   /**
-   * @copydoc xfer::DoSdDownload
+   * @brief Download a Saturn SD file into @p host_filename, truncating it first.
    * @details Downloads files from the Sega Saturn SD card over HostIO.
    * Protocol sequence:
    * 1. Host sends RemoteIoCommand::DOWNLOAD with target path payload.
@@ -1203,15 +1208,9 @@ namespace xfer
    * 3. Host reads file data sequentially, accumulating CRC-8 checksum.
    * 4. Saturn sends 1-byte final CRC-8 checksum for verification.
    */
-  int DoSdDownload(const char *saturn_sd_path, const char *host_filename)
+  static int DownloadToFile(const char *saturn_sd_path, const char *host_filename)
   {
-    // Step 1: Validate parameters and attempt to open destination file on the host machine.
-    if (saturn_sd_path == nullptr || host_filename == nullptr)
-    {
-      std::cerr << "[DoSdDownload] Missing path/filename argument." << std::endl;
-      return 0;
-    }
-
+    // Step 1: Open the destination file on the host machine.
     std::unique_ptr<FILE, FileDeleter> file(fopen(host_filename, "wb"));
     if (!file)
     {
@@ -1298,6 +1297,41 @@ namespace xfer
     return 1;
   }
 
+  /**
+   * @copydoc xfer::DoSdDownload
+   * @details Downloads into "<host_filename>.ftxpart" and renames it over @p host_filename
+   * only once the CRC matches, so a failed transfer never truncates an existing file.
+   */
+  int DoSdDownload(const char *saturn_sd_path, const char *host_filename)
+  {
+    if (saturn_sd_path == nullptr || host_filename == nullptr)
+    {
+      std::cerr << "[DoSdDownload] Missing path/filename argument." << std::endl;
+      return 0;
+    }
+
+    const std::filesystem::path dst(host_filename);
+    std::filesystem::path part = dst;
+    part += kDownloadPartSuffix;
+
+    std::error_code ec;
+    int result = DownloadToFile(saturn_sd_path, part.string().c_str());
+    if (result == 1)
+    {
+      std::filesystem::rename(part, dst, ec);
+      if (ec)
+      {
+        std::cerr << "[DoSdDownload] Can't replace '" << host_filename << "': " << ec.message() << std::endl;
+        result = 0;
+      }
+    }
+    if (result != 1)
+    {
+      std::filesystem::remove(part, ec);
+    }
+    return result;
+  }
+
   struct SdSyncEntry {
     std::string rel_path;
     bool is_dir = false;
@@ -1340,6 +1374,11 @@ namespace xfer
     {
       return -1;
     }
+    // SRL_HostIO's FatFs has no RTC (FF_FS_NORTC): every file the Saturn writes gets this stamp.
+    if (year == 2018 && month == 1 && day == 1 && hour == 0 && minute == 0)
+    {
+      return -1;
+    }
     std::tm tm = {};
     tm.tm_year = year - 1900;
     tm.tm_mon = month - 1;
@@ -1365,6 +1404,34 @@ namespace xfer
     if (base == "/") return "/" + rel;
     if (!base.empty() && base.back() == '/') return base + rel;
     return base + "/" + rel;
+  }
+
+  /// Compare a local file and a Saturn file by CRC-8: 1 same, 0 different, -1 on error.
+  static int SameCrc8(const std::filesystem::path &local_file, const std::string &saturn_file)
+  {
+    std::unique_ptr<FILE, FileDeleter> file(fopen(local_file.string().c_str(), "rb"));
+    crc8::crc_t local_crc = 0;
+    if (!file || !StreamAndCrc(file.get(), local_crc, [](const unsigned char *, size_t) { return true; }))
+    {
+      std::cerr << "[DoSdSync] Cannot read " << local_file << " to compare it." << std::endl;
+      return -1;
+    }
+
+    RemoteIoReply reply;
+    if (!SendRemoteIoCommand(RemoteIoCommand::CRC, saturn_file.c_str()) || !ReadRemoteIoReply(reply) ||
+        reply.status != RemoteIoStatus::OK)
+    {
+      std::cerr << "[DoSdSync] Cannot get the CRC of Saturn file " << saturn_file << std::endl;
+      return -1;
+    }
+    // Reply text: "[DoCrc] <path> CRC-8 = 0xHH"
+    const size_t pos = reply.payload.rfind("= 0x");
+    if (pos == std::string::npos)
+    {
+      std::cerr << "[DoSdSync] Unexpected CRC reply for " << saturn_file << ": " << reply.payload << std::endl;
+      return -1;
+    }
+    return (std::strtoul(reply.payload.c_str() + pos + 4, nullptr, 16) == local_crc) ? 1 : 0;
   }
 
   /// List one Saturn directory. Returns false if the listing could not be read.
@@ -1517,6 +1584,9 @@ namespace xfer
       if (ec) break;
       const fs::directory_entry &entry = *it;
       std::string name = entry.path().filename().string();
+      // ftx's own leftovers: an interrupted download, or a local copy kept by mode 3.
+      const fs::path ext = entry.path().extension();
+      if (ext == kDownloadPartSuffix || ext == kSyncBackupSuffix) continue;
       std::string rel = current_rel.empty() ? name : (current_rel + "/" + name);
 
       SdSyncEntry node;
@@ -1846,14 +1916,29 @@ namespace xfer
         {
           download_over(sat, loc);
         }
-        else if (loc.size != sat.size)
+        else
         {
+          // Equal sizes say nothing about content (e.g. save files), so compare CRC-8 too.
+          // shortcut: CRC-8 misses 1 in 256 changes and re-reads both files every sync; use a stronger hash if that bites.
+          const int same = (loc.size != sat.size) ? 0 : SameCrc8(local_base / loc.rel_path, CombineSaturnPath(saturn_base, sat.rel_path));
+          if (same < 0)
+          {
+            fail_count++;
+            continue;
+          }
+          if (same > 0)
+          {
+            skip_count++;
+            continue;
+          }
+
           // Bidirectional: the most recently modified side wins.
           if (loc.mtime < 0 || sat.mtime < 0 || loc.mtime / 60 == sat.mtime / 60)
           {
             std::cerr << "[DoSdSync] Conflict for " << loc.rel_path << " (Local: " << loc.size
                       << " bytes, Saturn: " << sat.size
-                      << " bytes) and modification times cannot tell which is newer. Skipping." << std::endl;
+                      << " bytes) differs and modification times cannot tell which is newer."
+                      << " Skipping; use mode 1 or 2 to pick a side." << std::endl;
             fail_count++;
           }
           else if (loc.mtime > sat.mtime)
@@ -1864,12 +1949,22 @@ namespace xfer
           else
           {
             std::cout << "[DoSdSync] Saturn copy of " << sat.rel_path << " is newer." << std::endl;
-            download_over(sat, loc);
+            // "Newer" trusts the Saturn's clock, which may be wrong: keep the local copy being replaced.
+            const fs::path cur = local_base / loc.rel_path;
+            fs::path bak = cur;
+            bak += kSyncBackupSuffix;
+            if (!loc.is_symlink && !fs::copy_file(cur, bak, fs::copy_options::overwrite_existing, ec))
+            {
+              std::cerr << "[DoSdSync] Cannot back up " << loc.rel_path << " to " << bak.string()
+                        << ": " << ec.message() << ". Skipping." << std::endl;
+              fail_count++;
+              ec.clear();
+            }
+            else
+            {
+              download_over(sat, loc);
+            }
           }
-        }
-        else
-        {
-          skip_count++;
         }
       }
     }

@@ -157,7 +157,8 @@ int DoSdUpload(const char *host_filename, const char *saturn_sd_path);
 /**
  * @brief Download a file from the Saturn SD card to a local file.
  * @param saturn_sd_path Source path on the SD card FAT filesystem.
- * @param host_filename Target local file name.
+ * @param host_filename Target local file name. Written via "<host_filename>.ftxpart" and
+ *        replaced only after the checksum matches, so a failed download leaves it untouched.
  * @return 1 on success, 0 on error.
  */
 int DoSdDownload(const char *saturn_sd_path, const char *host_filename);
@@ -169,8 +170,11 @@ int DoSdDownload(const char *saturn_sd_path, const char *host_filename);
  * @param mode Sync mode: 1 = local to Saturn (default), 2 = Saturn to local, 3 = bidirectional (both).
  *
  * Modes 1 and 2 copy every file from the source side. Mode 3 copies files missing
- * on one side; for files present on both sides with different sizes the newer copy
- * wins, and undecidable cases are reported as conflicts. Nothing is ever deleted.
+ * on one side; for files present on both sides that differ (size, then CRC-8) the newer
+ * copy wins, and undecidable cases are reported as conflicts. Files written by the Saturn
+ * carry SRL_HostIO's fixed no-RTC stamp and count as undecidable. A local file replaced in
+ * mode 3 is kept as "<name>.ftxbak". Nothing is ever deleted;
+ * local *.ftxpart / *.ftxbak files are never synced.
  * Paths are matched case-insensitively (FAT semantics).
  *
  * @return 1 on success, 0 on error (including any failed transfer or conflict).
