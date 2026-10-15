@@ -201,7 +201,7 @@ bool get_item_metadata(std::string& path, FileEntry& entry) {
  * @param path Requested request URI path.
  * @param target_entry Metadata of the requested item.
  * @param depth Depth header value indicating traversal depth ("0" or "1").
- * @return Conforming XML response string.
+ * @return Conforming XML response string, or an empty string if the directory listing failed.
  */
 std::string build_multistatus_xml(const std::string& path, const FileEntry& target_entry, const std::string& depth) {
     using boost::property_tree::ptree;
@@ -243,12 +243,13 @@ std::string build_multistatus_xml(const std::string& path, const FileEntry& targ
     if (depth == "1" && target_entry.is_dir) {
         std::string listing;
         std::string saturn_path = "-l " + path;
-        if (xfer::DoListStr(saturn_path.c_str(), listing) == 1) {
-            std::vector<FileEntry> sub_entries = parse_directory_listing(listing);
-            for (const auto& e : sub_entries) {
-                std::string sub_path = (path == "/") ? ("/" + e.name) : (path + "/" + e.name);
-                add_response(sub_path, e);
-            }
+        if (xfer::DoListStr(saturn_path.c_str(), listing) != 1) {
+            return std::string(); // an empty or partial folder would look real to the client
+        }
+        std::vector<FileEntry> sub_entries = parse_directory_listing(listing);
+        for (const auto& e : sub_entries) {
+            std::string sub_path = (path == "/") ? ("/" + e.name) : (path + "/" + e.name);
+            add_response(sub_path, e);
         }
     }
 
@@ -264,6 +265,9 @@ std::string build_multistatus_xml(const std::string& path, const FileEntry& targ
  * @return True if conforming, false if any component violates 8.3 limits.
  */
 bool is_valid_83_path(const std::string& path_str) {
+    if (path_str.empty() || path_str[0] != '/') {
+        return false; // not an SD FAT path (e.g. a raw "sdraw:" range)
+    }
     size_t start = 0;
     while (start < path_str.size()) {
         size_t end = path_str.find('/', start);
@@ -314,11 +318,12 @@ int DoWebDavServer(uint16_t port) {
         tcp::acceptor acceptor{ioc};
         acceptor.open(tcp::v4());
         acceptor.set_option(net::socket_base::reuse_address(true));
-        acceptor.bind({tcp::v4(), port});
+        // No authentication, so never expose the SD card to the network.
+        acceptor.bind({net::ip::address_v4::loopback(), port});
         acceptor.listen(net::socket_base::max_listen_connections);
         acceptor.non_blocking(true);
 
-        std::cout << "[WebDAV] Server listening on port " << port << " (via Boost.Beast)" << std::endl;
+        std::cout << "[WebDAV] Server listening on 127.0.0.1:" << port << " (via Boost.Beast)" << std::endl;
 
         while (!g_interrupt_flag) {
             boost::system::error_code ec;
@@ -360,6 +365,15 @@ int DoWebDavServer(uint16_t port) {
 
             std::cout << "[WebDAV] Request: " << method << " " << path << std::endl;
 
+            // Only SD FAT paths: the cartridge treats e.g. "sdraw:0:64" as raw sectors to erase or overwrite.
+            if (path.empty() || path[0] != '/') {
+                http::response<http::empty_body> res{http::status::bad_request, req.version()};
+                res.set(http::field::connection, "close");
+                res.prepare_payload();
+                http::write(socket, res, ec);
+                continue;
+            }
+
             if (method == "OPTIONS") {
                 http::response<http::empty_body> res{http::status::ok, req.version()};
                 res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
@@ -378,6 +392,13 @@ int DoWebDavServer(uint16_t port) {
                     http::write(socket, res, ec);
                 } else {
                     std::string xml = build_multistatus_xml(path, target_entry, depth);
+                    if (xml.empty()) {
+                        http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
+                        res.set(http::field::connection, "close");
+                        res.prepare_payload();
+                        http::write(socket, res, ec);
+                        continue;
+                    }
                     http::response<http::string_body> res{http::status::multi_status, req.version()};
                     res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
                     res.set(http::field::content_type, "application/xml; charset=utf-8");
@@ -510,15 +531,23 @@ int DoWebDavServer(uint16_t port) {
                             http::write(socket, res, ec);
                         } else {
                             FileEntry dest_entry;
+                            const std::string requested_dest = dest_path;
                             bool dest_exists = get_item_metadata(dest_path, dest_entry);
+                            // Lookups ignore case, so "a.sav" -> "A.SAV" finds the source itself.
+                            const bool same_item = dest_exists && dest_path == path;
                             std::string overwrite{req["Overwrite"]};
-                            if (dest_exists && overwrite == "F") {
+                            if (same_item && (method == "COPY" || requested_dest == path)) {
+                                http::response<http::empty_body> res{http::status::forbidden, req.version()};
+                                res.set(http::field::connection, "close");
+                                res.prepare_payload();
+                                http::write(socket, res, ec);
+                            } else if (dest_exists && !same_item && overwrite == "F") {
                                 http::response<http::empty_body> res{http::status::precondition_failed, req.version()};
                                 res.set(http::field::connection, "close");
                                 res.prepare_payload();
                                 http::write(socket, res, ec);
                             } else {
-                                if (dest_exists) {
+                                if (dest_exists && !same_item) {
                                     // Remove the destination first to allow f_rename to succeed
                                     int remove_status = xfer::DoRemove(dest_path.c_str());
                                     if (remove_status != 1) {
@@ -526,7 +555,7 @@ int DoWebDavServer(uint16_t port) {
                                     }
                                 }
 
-                                int status = xfer::DoRename(path.c_str(), dest_path.c_str());
+                                int status = xfer::DoRename(path.c_str(), requested_dest.c_str());
                                 if (status == 1) {
                                     http::status response_status = dest_exists ? http::status::no_content : http::status::created;
                                     http::response<http::empty_body> res{response_status, req.version()};
@@ -629,26 +658,33 @@ int DoWebDavServer(uint16_t port) {
                             http::write(socket, res, ec);
                         } else {
                             FileEntry dest_entry;
+                            const std::string requested_dest = dest_path;
                             bool dest_exists = get_item_metadata(dest_path, dest_entry);
+                            // Lookups ignore case, so "a.sav" -> "A.SAV" finds the source itself.
+                            const bool same_item = dest_exists && dest_path == path;
                             std::string overwrite{req["Overwrite"]};
-                            if (dest_exists && overwrite == "F") {
+                            if (same_item && (method == "COPY" || requested_dest == path)) {
+                                http::response<http::empty_body> res{http::status::forbidden, req.version()};
+                                res.set(http::field::connection, "close");
+                                res.prepare_payload();
+                                http::write(socket, res, ec);
+                            } else if (dest_exists && !same_item && overwrite == "F") {
                                 http::response<http::empty_body> res{http::status::precondition_failed, req.version()};
                                 res.set(http::field::connection, "close");
                                 res.prepare_payload();
                                 http::write(socket, res, ec);
                             } else {
-                                if (dest_exists) {
-                                    int remove_status = xfer::DoRemove(dest_path.c_str());
-                                    if (remove_status != 1) {
-                                        xfer::DoRmdir(dest_path.c_str());
-                                    }
-                                }
-
                                 std::string temp_filename = "ftx_webdav_copy_temp.bin";
                                 int download_status = xfer::DoSdDownload(path.c_str(), temp_filename.c_str());
                                 int upload_status = 0;
                                 if (download_status == 1) {
-                                    upload_status = xfer::DoSdUpload(temp_filename.c_str(), dest_path.c_str());
+                                    if (dest_exists) {
+                                        int remove_status = xfer::DoRemove(dest_path.c_str());
+                                        if (remove_status != 1) {
+                                            xfer::DoRmdir(dest_path.c_str());
+                                        }
+                                    }
+                                    upload_status = xfer::DoSdUpload(temp_filename.c_str(), requested_dest.c_str());
                                 }
                                 std::remove(temp_filename.c_str());
 

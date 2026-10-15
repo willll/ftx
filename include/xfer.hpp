@@ -88,7 +88,8 @@ int DoList(const char *path);
  * @brief List files and directories in a path and retrieve as string.
  * @param path Directory path to list.
  * @param out_listing Output string to append listing to.
- * @return 1 on success, 0 on error.
+ * @return 1 on success, 0 on error (including a listing the device cut short
+ *         because the folder has too many entries).
  */
 int DoListStr(const char *path, std::string &out_listing);
 

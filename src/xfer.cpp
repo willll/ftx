@@ -81,6 +81,9 @@ namespace xfer
 
     constexpr uint8_t REMOTE_IO_MAGIC[4] = {'S', 'R', 'L', '1'};
     constexpr uint32_t SDC_BLOCK_SIZE = 512;
+    /// SRL_HostIO builds a LIST reply in a 1024-byte buffer and silently cuts it there
+    /// (still status OK), so a reply this long may be missing entries.
+    constexpr std::size_t LIST_REPLY_CAP = 1023;
 
     enum class RemoteIoCommand : uint8_t
     {
@@ -577,6 +580,10 @@ namespace xfer
         {
           std::cout << '\n';
         }
+        if (reply.payload.size() >= LIST_REPLY_CAP)
+        {
+          std::cerr << "[DoList] Warning: the device cut this listing short; some entries may be missing." << std::endl;
+        }
       }
 
       if (reply.status != RemoteIoStatus::OK)
@@ -627,6 +634,11 @@ namespace xfer
 
     for (;;)
     {
+      if (reply.payload.size() >= LIST_REPLY_CAP)
+      {
+        std::cerr << "[DoListStr] Listing of '" << path << "' was cut short by the device (too many entries)." << std::endl;
+        return 0;
+      }
       if (!reply.payload.empty())
       {
         out_listing += reply.payload;
