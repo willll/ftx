@@ -1,3 +1,0 @@
-@echo off
-echo Compiling ...
-gcc -o ./copystub_test -DCOPYSTUB_TEST copystub.c

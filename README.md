@@ -105,6 +105,18 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 
+### Tests
+
+`tests/fake_saturn` checks the commands that write or delete files (`--get`, `--sync`, the WebDAV server, interrupted uploads) and the GDB proxy's session handling, without hardware. `fakesat.c` is an `LD_PRELOAD` stand-in for libftdi that answers the cartridge's remote I/O commands from a host folder. It needs a dynamically linked ftx (not `-DBUILD_STATIC=ON`) on Linux:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+gcc -shared -fPIC -O2 -o build/fakesat.so tests/fake_saturn/fakesat.c
+python3 tests/fake_saturn/test_ftx.py build/ftx build/fakesat.so
+```
+
+CI runs this on every Linux build.
+
 ## Windows Driver Setup
 
 On Microsoft Windows, the utility communicates with the Sega Saturn USB cartridge via `libusb` and `libftdi`. Since Windows installs the standard FTDI Serial Port (COM) driver by default, you must replace it with the generic **WinUSB** driver for the utility to detect and access the device.
@@ -362,6 +374,8 @@ The source is organized into focused modules:
 - **src/ftx.cpp** — Main entry point and command-line parsing
 - **src/xfer.cpp** — Data transfer operations (upload, download, execute)
 - **src/crc.cpp** — CRC-8 checksum computation
+- **src/ftdi_webdav.cpp** — WebDAV server mapping HTTP requests to cartridge file commands
+- **tests/fake_saturn/** — Hardware-free tests against a fake cartridge
 - **include/log.hpp** — Deduplicating debug logger with release-mode no-op
 
 ### Build System

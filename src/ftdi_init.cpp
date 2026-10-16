@@ -86,13 +86,13 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
         {
             status = ftdi_usb_open_desc(&g_Device, VID, PID, nullptr, Serial.c_str());
         }
-        deviceOpened = (status >= 0 || status == -5);
+        deviceOpened = (status >= 0);
         CDBG_LOG_ON_CHANGE("InitComms.ftdi_usb_open",
                            "[InitComms][dbg] ftdi_usb_open status=" << status << std::endl);
 
-        if (status < 0 && status != -5)
+        if (status < 0)
         {
-            // Step 5: Handle error if device cannot be opened (except for specific error -5)
+            // Step 5: Handle error if device cannot be opened (-5 = claimed by another program, e.g. a running ftx -g)
             std::cerr << "[InitComms] Device open error: " << ftdi_get_error_string(&g_Device) << std::endl;
             error = true;
         }

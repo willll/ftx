@@ -36,6 +36,14 @@ jobs:
           cmake --build .
           mv ftx ftx-linux
 
+      - name: Fake-Saturn tests
+        # The release build is fully static, so build a dynamically linked ftx the fake libftdi can stand in for.
+        run: |
+          cmake -S . -B build-test -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-test
+          gcc -shared -fPIC -O2 -Wall -o build-test/fakesat.so tests/fake_saturn/fakesat.c
+          python3 tests/fake_saturn/test_ftx.py build-test/ftx build-test/fakesat.so
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
