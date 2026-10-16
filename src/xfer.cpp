@@ -83,6 +83,8 @@ namespace xfer
     /// SRL_HostIO builds a LIST reply in a 1024-byte buffer and silently cuts it there
     /// (still status OK), so a reply this long may be missing entries.
     constexpr std::size_t LIST_REPLY_CAP = 1023;
+    /// Mode 3 sync compares same-size files by CRC only up to this size (memory-card images are <= 4 MB).
+    constexpr uint32_t SYNC_CRC_MAX_SIZE = 4 * 1024 * 1024;
 
     enum class RemoteIoCommand : uint8_t
     {
@@ -321,6 +323,50 @@ namespace xfer
     bool ReadRemoteIoReply(RemoteIoReply &reply)
     {
       return TryReadRemoteIoReply(reply, 5000) == 1;
+    }
+
+    /// The Saturn checksums an SD file at roughly 75 KB/s and sends nothing until it is done.
+    /// One ReadExactFromDevice idle cycle is ~16 ms on the DevCart, so 2 cycles per KB leaves a 2x margin.
+    int CrcIdleCycles(uint32_t file_size)
+    {
+      return 5000 + 2 * static_cast<int>(file_size / 1024);
+    }
+
+    /**
+     * @brief Ask the Saturn for the CRC-8 of an SD file.
+     * @param idle_cycles How long to wait for the answer (see CrcIdleCycles).
+     * @return The CRC (0-255), or -1 on error.
+     * @note A CRC reply for another path is the late answer to an earlier request that timed
+     *       out; it is skipped so it can't be taken for this file's CRC.
+     */
+    int SaturnCrc8(const std::string &path, int idle_cycles)
+    {
+      if (!SendRemoteIoCommand(RemoteIoCommand::CRC, path.c_str()))
+      {
+        return -1;
+      }
+      const std::string expected = "[DoCrc] " + path + " CRC-8 = 0x";
+      for (;;)
+      {
+        RemoteIoReply reply;
+        if (TryReadRemoteIoReply(reply, idle_cycles) != 1)
+        {
+          std::cerr << "[DoCrc] No CRC reply for " << path << std::endl;
+          return -1;
+        }
+        const size_t pos = reply.payload.find(expected);
+        if (reply.status == RemoteIoStatus::OK && pos == std::string::npos)
+        {
+          std::cerr << "[DoCrc] Ignoring a late reply to an earlier request: " << reply.payload;
+          continue;
+        }
+        if (reply.status != RemoteIoStatus::OK || pos == std::string::npos)
+        {
+          std::cerr << reply.payload << "[DoCrc] Device returned status " << static_cast<int>(reply.status) << std::endl;
+          return -1;
+        }
+        return static_cast<int>(std::strtoul(reply.payload.c_str() + pos + expected.size(), nullptr, 16) & 0xFF);
+      }
     }
 
     int ExecuteRemoteIoCommand(RemoteIoCommand command, const char *argument,
@@ -667,7 +713,15 @@ namespace xfer
    */
   int DoCrc(const char *filename)
   {
-    return ExecuteRemoteIoCommand(RemoteIoCommand::CRC, filename, "DoCrc");
+    // The file size isn't known here, so wait for as long as the Saturn needs (Ctrl-C stops).
+    const int crc = SaturnCrc8(filename, std::numeric_limits<int>::max());
+    if (crc < 0)
+    {
+      return 0;
+    }
+    std::cout << "[DoCrc] " << filename << " CRC-8 = 0x" << std::hex << std::uppercase << std::setw(2)
+              << std::setfill('0') << crc << std::dec << std::nouppercase << std::setfill(' ') << std::endl;
+    return 1;
   }
 
   /// Temporary suffix for downloads in progress; the file only gets its real name once verified.
@@ -1410,7 +1464,7 @@ namespace xfer
   }
 
   /// Compare a local file and a Saturn file by CRC-8: 1 same, 0 different, -1 on error.
-  static int SameCrc8(const std::filesystem::path &local_file, const std::string &saturn_file)
+  static int SameCrc8(const std::filesystem::path &local_file, const std::string &saturn_file, uint32_t size)
   {
     std::unique_ptr<FILE, FileDeleter> file(fopen(local_file.string().c_str(), "rb"));
     crc8::crc_t local_crc = 0;
@@ -1420,21 +1474,13 @@ namespace xfer
       return -1;
     }
 
-    RemoteIoReply reply;
-    if (!SendRemoteIoCommand(RemoteIoCommand::CRC, saturn_file.c_str()) || !ReadRemoteIoReply(reply) ||
-        reply.status != RemoteIoStatus::OK)
+    const int saturn_crc = SaturnCrc8(saturn_file, CrcIdleCycles(size));
+    if (saturn_crc < 0)
     {
       std::cerr << "[DoSdSync] Cannot get the CRC of Saturn file " << saturn_file << std::endl;
       return -1;
     }
-    // Reply text: "[DoCrc] <path> CRC-8 = 0xHH"
-    const size_t pos = reply.payload.rfind("= 0x");
-    if (pos == std::string::npos)
-    {
-      std::cerr << "[DoSdSync] Unexpected CRC reply for " << saturn_file << ": " << reply.payload << std::endl;
-      return -1;
-    }
-    return (std::strtoul(reply.payload.c_str() + pos + 4, nullptr, 16) == local_crc) ? 1 : 0;
+    return (saturn_crc == local_crc) ? 1 : 0;
   }
 
   /// List one Saturn directory. Returns false if the listing could not be read.
@@ -1921,9 +1967,16 @@ namespace xfer
         }
         else
         {
-          // Equal sizes say nothing about content (e.g. save files), so compare CRC-8 too.
-          // shortcut: CRC-8 misses 1 in 256 changes and re-reads both files every sync; use a stronger hash if that bites.
-          const int same = (loc.size != sat.size) ? 0 : SameCrc8(local_base / loc.rel_path, CombineSaturnPath(saturn_base, sat.rel_path));
+          // Equal sizes say nothing about content (e.g. save files), so compare CRC-8 too, but only up to
+          // SYNC_CRC_MAX_SIZE: the Saturn checksums at ~75 KB/s, so a 500 MB image would take about 2 hours.
+          // shortcut: CRC-8 misses 1 in 256 changes, and bigger same-size files count as unchanged; use a stronger hash and a faster check if that bites.
+          int same = 0;
+          if (loc.size == sat.size)
+          {
+            same = (loc.size > SYNC_CRC_MAX_SIZE)
+                       ? 1
+                       : SameCrc8(local_base / loc.rel_path, CombineSaturnPath(saturn_base, sat.rel_path), loc.size);
+          }
           if (same < 0)
           {
             fail_count++;

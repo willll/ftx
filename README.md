@@ -163,11 +163,11 @@ To install the WinUSB driver:
 - `--mkdir <path>`           : Create a directory on the target
 - `--rmdir <path>`           : Delete a directory on the target
 - `--cp <file> <target>`     : Copy a file to the target. `<target>` can be a FAT path (e.g., `/folder/file.bin`) or raw SD sectors (`sdraw:start:count`).
-- `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target
+- `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target (the Saturn reads about 75 KB/s, so a big file takes minutes; Ctrl-C stops waiting)
 - `--lcrc <file>`            : Calculate and print the CRC-8 checksum for a local host file
 - `--sync <local> <saturn> [mode]`: Synchronize a local directory with a Sega Saturn SD card directory recursively (`mode`: `1`=local->saturn [default], `2`=saturn->local, `3`=both).
   - Modes 1 and 2 copy every file from the source side, overwriting the destination.
-  - Mode 3 copies files that exist on only one side. When a file exists on both sides and differs (different size, or same size but different CRC-8), the more recently modified copy wins; if the timestamps can't decide (same minute or unknown), the file is reported as a conflict and left alone, and mode 1 or 2 picks a side. The Saturn has no clock (SRL_HostIO stamps every file it writes 2018-01-01 00:00), so a file last written by the Saturn always has an unknown time. Before mode 3 replaces a local file it keeps the old one as `<name>.ftxbak`.
+  - Mode 3 copies files that exist on only one side. When a file exists on both sides and differs (different size, or same size but different CRC-8; files over 4 MB of equal size are assumed identical, because the Saturn computes a CRC at only about 75 KB/s), the more recently modified copy wins; if the timestamps can't decide (same minute or unknown), the file is reported as a conflict and left alone, and mode 1 or 2 picks a side. The Saturn has no clock (SRL_HostIO stamps every file it writes 2018-01-01 00:00), so a file last written by the Saturn always has an unknown time. Before mode 3 replaces a local file it keeps the old one as `<name>.ftxbak`.
   - Downloads are written to `<name>.ftxpart` and only replace `<name>` once the checksum matches, so a failed transfer never damages an existing file. Local `*.ftxpart` and `*.ftxbak` files are never synced.
   - SRL_HostIO's folder listing holds only about 20 entries and is cut off silently beyond that. ftx detects this and stops the sync (and fails the WebDAV request) instead of acting on a partial folder.
   - No mode ever deletes files. Paths are matched case-insensitively, like FAT. Unknown `mode` values are rejected.
