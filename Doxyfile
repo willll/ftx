@@ -10,7 +10,7 @@ INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.hpp *.h *.cpp *.doxygen
 RECURSIVE              = YES
 
-EXCLUDE_PATTERNS       = */satcom_lib/* */build/*
+EXCLUDE_PATTERNS       = */build/*
 
 OUTPUT_DIRECTORY       = ./docs
 GENERATE_HTML          = YES

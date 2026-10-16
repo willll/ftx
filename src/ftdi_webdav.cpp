@@ -20,6 +20,8 @@
 #include <ctime>
 #include <thread>
 #include <chrono>
+#include <cstdint>
+#include <limits>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -289,6 +291,183 @@ bool is_valid_83_path(const std::string& path_str) {
     return true;
 }
 
+/// Path part of a request target or Destination header: no scheme/host, query or trailing slash.
+std::string normalize_path(const std::string& target) {
+    std::string path = target;
+    size_t proto_pos = path.find("://");
+    if (proto_pos != std::string::npos) {
+        size_t path_pos = path.find('/', proto_pos + 3);
+        path = (path_pos != std::string::npos) ? path.substr(path_pos) : "/";
+    }
+    path = url_decode(path);
+    size_t q = path.find('?');
+    if (q != std::string::npos) {
+        path = path.substr(0, q);
+    }
+    if (path.size() > 1 && path.back() == '/') {
+        path.pop_back();
+    }
+    return path;
+}
+
+using Request = http::request<http::string_body>;
+using Response = http::response<http::string_body>;
+
+Response make_response(const Request& req, http::status status, std::string body = {}) {
+    Response res{status, req.version()};
+    res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+    res.body() = std::move(body);
+    return res;
+}
+
+/// Delete a file, or an (empty) directory if it is one. Returns 1 on success.
+int remove_item(const std::string& path) {
+    return (xfer::DoRemove(path.c_str()) == 1) ? 1 : xfer::DoRmdir(path.c_str());
+}
+
+Response move_or_copy(const Request& req, const std::string& method, std::string path) {
+    std::string dest_header{req["Destination"]};
+    if (dest_header.empty()) {
+        return make_response(req, http::status::bad_request);
+    }
+    std::string dest_path = normalize_path(dest_header);
+    if (!is_valid_83_path(dest_path)) {
+        std::cerr << "[WebDAV] Rejected " << method << ": Destination path component violates strict 8.3 filename conventions: " << dest_path << std::endl;
+        return make_response(req, http::status::bad_request,
+            "Error: Destination path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).");
+    }
+
+    FileEntry source_entry;
+    if (!get_item_metadata(path, source_entry)) {
+        return make_response(req, http::status::not_found);
+    }
+    FileEntry dest_entry;
+    const std::string requested_dest = dest_path;
+    const bool dest_exists = get_item_metadata(dest_path, dest_entry);
+    // Lookups ignore case, so "a.sav" -> "A.SAV" finds the source itself.
+    const bool same_item = dest_exists && dest_path == path;
+    if (same_item && (method == "COPY" || requested_dest == path)) {
+        return make_response(req, http::status::forbidden);
+    }
+    if (dest_exists && !same_item && std::string(req["Overwrite"]) == "F") {
+        return make_response(req, http::status::precondition_failed);
+    }
+
+    int status = 0;
+    if (method == "MOVE") {
+        if (dest_exists && !same_item) {
+            remove_item(dest_path); // f_rename fails if the destination exists
+        }
+        status = xfer::DoRename(path.c_str(), requested_dest.c_str());
+    } else {
+        const char* temp_filename = "ftx_webdav_copy_temp.bin";
+        status = xfer::DoSdDownload(path.c_str(), temp_filename);
+        if (status == 1) {
+            // Only touch the destination once the source is safely on the host.
+            if (dest_exists) {
+                remove_item(dest_path);
+            }
+            status = xfer::DoSdUpload(temp_filename, requested_dest.c_str());
+        }
+        std::remove(temp_filename);
+    }
+    if (status != 1) {
+        return make_response(req, http::status::internal_server_error);
+    }
+    return make_response(req, dest_exists ? http::status::no_content : http::status::created);
+}
+
+/// Map one WebDAV request onto cartridge file commands.
+Response handle_request(const Request& req) {
+    const std::string method{req.method_string()};
+    std::string path = normalize_path(std::string(req.target()));
+    std::cout << "[WebDAV] Request: " << method << " " << path << std::endl;
+
+    // Only SD FAT paths: the cartridge treats e.g. "sdraw:0:64" as raw sectors to erase or overwrite.
+    if (path.empty() || path[0] != '/') {
+        return make_response(req, http::status::bad_request);
+    }
+
+    if (method == "OPTIONS") {
+        Response res = make_response(req, http::status::ok);
+        res.set(http::field::allow, "OPTIONS, GET, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY");
+        res.set("DAV", "1");
+        return res;
+    }
+    if (method == "PROPFIND") {
+        std::string depth{req["Depth"]};
+        if (depth.empty()) {
+            depth = "1";
+        }
+        FileEntry target_entry;
+        if (!get_item_metadata(path, target_entry)) {
+            return make_response(req, http::status::not_found);
+        }
+        std::string xml = build_multistatus_xml(path, target_entry, depth);
+        if (xml.empty()) {
+            return make_response(req, http::status::internal_server_error);
+        }
+        Response res = make_response(req, http::status::multi_status, std::move(xml));
+        res.set(http::field::content_type, "application/xml; charset=utf-8");
+        return res;
+    }
+    if (method == "PUT") {
+        if (!is_valid_83_path(path)) {
+            std::cerr << "[WebDAV] Rejected PUT: Path component violates strict 8.3 filename conventions: " << path << std::endl;
+            return make_response(req, http::status::bad_request,
+                "Error: Path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).");
+        }
+        const char* temp_filename = "ftx_webdav_temp.bin";
+        {
+            std::ofstream temp_file(temp_filename, std::ios::binary);
+            if (!temp_file) {
+                return make_response(req, http::status::internal_server_error);
+            }
+            temp_file.write(req.body().data(), req.body().size());
+        }
+        int status = xfer::DoSdUpload(temp_filename, path.c_str());
+        std::remove(temp_filename);
+        return make_response(req, status == 1 ? http::status::created : http::status::internal_server_error);
+    }
+    if (method == "DELETE") {
+        return make_response(req, remove_item(path) == 1 ? http::status::no_content : http::status::internal_server_error);
+    }
+    if (method == "MKCOL") {
+        if (!is_valid_83_path(path)) {
+            std::cerr << "[WebDAV] Rejected MKCOL: Path component violates strict 8.3 filename conventions: " << path << std::endl;
+            return make_response(req, http::status::bad_request,
+                "Error: Directory name violates strict 8.3 conventions (max 8 characters).");
+        }
+        return make_response(req, xfer::DoMkdir(path.c_str()) == 1 ? http::status::created : http::status::internal_server_error);
+    }
+    if (method == "GET") {
+        FileEntry entry;
+        if (!get_item_metadata(path, entry) || entry.is_dir) {
+            return make_response(req, http::status::not_found);
+        }
+        const char* temp_filename = "ftx_webdav_get_temp.bin";
+        if (xfer::DoSdDownload(path.c_str(), temp_filename) != 1) {
+            std::remove(temp_filename);
+            return make_response(req, http::status::internal_server_error);
+        }
+        std::ifstream file(temp_filename, std::ios::binary);
+        if (!file) {
+            std::remove(temp_filename);
+            return make_response(req, http::status::internal_server_error);
+        }
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+        std::remove(temp_filename);
+        Response res = make_response(req, http::status::ok, std::move(content));
+        res.set(http::field::content_type, "application/octet-stream");
+        return res;
+    }
+    if (method == "MOVE" || method == "COPY") {
+        return move_or_copy(req, method, path);
+    }
+    return make_response(req, http::status::method_not_allowed);
+}
+
 } // namespace
 
 namespace ftdi {
@@ -340,377 +519,38 @@ int DoWebDavServer(uint16_t port) {
             }
 
             beast::flat_buffer buffer;
-            http::request<http::string_body> req;
-            http::read(socket, buffer, req, ec);
+            http::request_parser<http::string_body> parser;
+            parser.body_limit(std::numeric_limits<std::uint32_t>::max()); // FAT32's file size limit; Beast defaults to 1 MB
+
+            // Read with a deadline: a client that connects and sends nothing must not block the server or Ctrl-C.
+            bool done = false;
+            http::async_read(socket, buffer, parser, [&](beast::error_code e, std::size_t) {
+                ec = e;
+                done = true;
+            });
+            ioc.restart();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (!done && !g_interrupt_flag && std::chrono::steady_clock::now() < deadline) {
+                ioc.run_for(std::chrono::milliseconds(200));
+            }
+            if (!done) {
+                socket.close(ec);
+                ioc.restart();
+                ioc.run(); // let the cancelled read complete
+                if (!g_interrupt_flag) {
+                    std::cerr << "[WebDAV] Client sent no complete request within 30 s; dropped." << std::endl;
+                }
+                continue;
+            }
             if (ec) {
+                std::cerr << "[WebDAV] Bad request: " << ec.message() << std::endl;
                 continue;
             }
 
-            std::string method{req.method_string()};
-            std::string raw_path{req.target()};
-
-            std::string depth{req["Depth"]};
-            if (depth.empty()) {
-                depth = "1";
-            }
-
-            std::string path = url_decode(raw_path);
-            size_t q = path.find('?');
-            if (q != std::string::npos) {
-                path = path.substr(0, q);
-            }
-            if (path.size() > 1 && path.back() == '/') {
-                path.pop_back();
-            }
-
-            std::cout << "[WebDAV] Request: " << method << " " << path << std::endl;
-
-            // Only SD FAT paths: the cartridge treats e.g. "sdraw:0:64" as raw sectors to erase or overwrite.
-            if (path.empty() || path[0] != '/') {
-                http::response<http::empty_body> res{http::status::bad_request, req.version()};
-                res.set(http::field::connection, "close");
-                res.prepare_payload();
-                http::write(socket, res, ec);
-                continue;
-            }
-
-            if (method == "OPTIONS") {
-                http::response<http::empty_body> res{http::status::ok, req.version()};
-                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                res.set(http::field::allow, "OPTIONS, GET, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY");
-                res.set("DAV", "1");
-                res.set(http::field::connection, "close");
-                res.prepare_payload();
-                http::write(socket, res, ec);
-            }
-            else if (method == "PROPFIND") {
-                FileEntry target_entry;
-                if (!get_item_metadata(path, target_entry)) {
-                    http::response<http::empty_body> res{http::status::not_found, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    std::string xml = build_multistatus_xml(path, target_entry, depth);
-                    if (xml.empty()) {
-                        http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                        continue;
-                    }
-                    http::response<http::string_body> res{http::status::multi_status, req.version()};
-                    res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                    res.set(http::field::content_type, "application/xml; charset=utf-8");
-                    res.set(http::field::connection, "close");
-                    res.body() = xml;
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                }
-            }
-            else if (method == "PUT") {
-                if (!is_valid_83_path(path)) {
-                    std::cerr << "[WebDAV] Rejected PUT: Path component violates strict 8.3 filename conventions: " << path << std::endl;
-                    http::response<http::string_body> res{http::status::bad_request, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.body() = "Error: Path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).";
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    std::string temp_filename = "ftx_webdav_temp.bin";
-                    std::ofstream temp_file(temp_filename, std::ios::binary);
-                    if (!temp_file) {
-                        http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                    } else {
-                        temp_file.write(req.body().data(), req.body().size());
-                        temp_file.close();
-
-                        int status = xfer::DoSdUpload(temp_filename.c_str(), path.c_str());
-                        std::remove(temp_filename.c_str());
-
-                        if (status == 1) {
-                            http::response<http::empty_body> res{http::status::created, req.version()};
-                            res.set(http::field::connection, "close");
-                            res.prepare_payload();
-                            http::write(socket, res, ec);
-                        } else {
-                            http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                            res.set(http::field::connection, "close");
-                            res.prepare_payload();
-                            http::write(socket, res, ec);
-                        }
-                    }
-                }
-            }
-            else if (method == "DELETE") {
-                int status = xfer::DoRemove(path.c_str());
-                if (status != 1) {
-                    status = xfer::DoRmdir(path.c_str());
-                }
-
-                if (status == 1) {
-                    http::response<http::empty_body> res{http::status::no_content, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                }
-            }
-            else if (method == "MKCOL") {
-                if (!is_valid_83_path(path)) {
-                    std::cerr << "[WebDAV] Rejected MKCOL: Path component violates strict 8.3 filename conventions: " << path << std::endl;
-                    http::response<http::string_body> res{http::status::bad_request, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.body() = "Error: Directory name violates strict 8.3 conventions (max 8 characters).";
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    int status = xfer::DoMkdir(path.c_str());
-                    if (status == 1) {
-                        http::response<http::empty_body> res{http::status::created, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                    } else {
-                        http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                    }
-                }
-            }
-            else if (method == "MOVE") {
-                std::string dest_header{req["Destination"]};
-                if (dest_header.empty()) {
-                    http::response<http::empty_body> res{http::status::bad_request, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    std::string dest_path;
-                    size_t proto_pos = dest_header.find("://");
-                    if (proto_pos != std::string::npos) {
-                        size_t path_pos = dest_header.find('/', proto_pos + 3);
-                        if (path_pos != std::string::npos) {
-                            dest_path = dest_header.substr(path_pos);
-                        } else {
-                            dest_path = "/";
-                        }
-                    } else {
-                        dest_path = dest_header;
-                    }
-                    dest_path = url_decode(dest_path);
-                    size_t q = dest_path.find('?');
-                    if (q != std::string::npos) {
-                        dest_path = dest_path.substr(0, q);
-                    }
-                    if (dest_path.size() > 1 && dest_path.back() == '/') {
-                        dest_path.pop_back();
-                    }
-
-                    if (!is_valid_83_path(dest_path)) {
-                        std::cerr << "[WebDAV] Rejected MOVE: Destination path component violates strict 8.3 filename conventions: " << dest_path << std::endl;
-                        http::response<http::string_body> res{http::status::bad_request, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.body() = "Error: Destination path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).";
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                    } else {
-                        FileEntry source_entry;
-                        if (!get_item_metadata(path, source_entry)) {
-                            http::response<http::empty_body> res{http::status::not_found, req.version()};
-                            res.set(http::field::connection, "close");
-                            res.prepare_payload();
-                            http::write(socket, res, ec);
-                        } else {
-                            FileEntry dest_entry;
-                            const std::string requested_dest = dest_path;
-                            bool dest_exists = get_item_metadata(dest_path, dest_entry);
-                            // Lookups ignore case, so "a.sav" -> "A.SAV" finds the source itself.
-                            const bool same_item = dest_exists && dest_path == path;
-                            std::string overwrite{req["Overwrite"]};
-                            if (same_item && (method == "COPY" || requested_dest == path)) {
-                                http::response<http::empty_body> res{http::status::forbidden, req.version()};
-                                res.set(http::field::connection, "close");
-                                res.prepare_payload();
-                                http::write(socket, res, ec);
-                            } else if (dest_exists && !same_item && overwrite == "F") {
-                                http::response<http::empty_body> res{http::status::precondition_failed, req.version()};
-                                res.set(http::field::connection, "close");
-                                res.prepare_payload();
-                                http::write(socket, res, ec);
-                            } else {
-                                if (dest_exists && !same_item) {
-                                    // Remove the destination first to allow f_rename to succeed
-                                    int remove_status = xfer::DoRemove(dest_path.c_str());
-                                    if (remove_status != 1) {
-                                        xfer::DoRmdir(dest_path.c_str());
-                                    }
-                                }
-
-                                int status = xfer::DoRename(path.c_str(), requested_dest.c_str());
-                                if (status == 1) {
-                                    http::status response_status = dest_exists ? http::status::no_content : http::status::created;
-                                    http::response<http::empty_body> res{response_status, req.version()};
-                                    res.set(http::field::connection, "close");
-                                    res.prepare_payload();
-                                    http::write(socket, res, ec);
-                                } else {
-                                    http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                                    res.set(http::field::connection, "close");
-                                    res.prepare_payload();
-                                    http::write(socket, res, ec);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else if (method == "GET") {
-                FileEntry entry;
-                if (!get_item_metadata(path, entry) || entry.is_dir) {
-                    http::response<http::empty_body> res{http::status::not_found, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    std::string temp_filename = "ftx_webdav_get_temp.bin";
-                    int status = xfer::DoSdDownload(path.c_str(), temp_filename.c_str());
-                    if (status != 1) {
-                        std::remove(temp_filename.c_str());
-                        http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                    } else {
-                        std::ifstream file(temp_filename, std::ios::binary);
-                        if (!file) {
-                            std::remove(temp_filename.c_str());
-                            http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                            res.set(http::field::connection, "close");
-                            res.prepare_payload();
-                            http::write(socket, res, ec);
-                        } else {
-                            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                            file.close();
-                            std::remove(temp_filename.c_str());
-
-                            http::response<http::string_body> res{http::status::ok, req.version()};
-                            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                            res.set(http::field::content_type, "application/octet-stream");
-                            res.set(http::field::connection, "close");
-                            res.body() = std::move(content);
-                            res.prepare_payload();
-                            http::write(socket, res, ec);
-                        }
-                    }
-                }
-            }
-            else if (method == "COPY") {
-                std::string dest_header{req["Destination"]};
-                if (dest_header.empty()) {
-                    http::response<http::empty_body> res{http::status::bad_request, req.version()};
-                    res.set(http::field::connection, "close");
-                    res.prepare_payload();
-                    http::write(socket, res, ec);
-                } else {
-                    std::string dest_path;
-                    size_t proto_pos = dest_header.find("://");
-                    if (proto_pos != std::string::npos) {
-                        size_t path_pos = dest_header.find('/', proto_pos + 3);
-                        if (path_pos != std::string::npos) {
-                            dest_path = dest_header.substr(path_pos);
-                        } else {
-                            dest_path = "/";
-                        }
-                    } else {
-                        dest_path = dest_header;
-                    }
-                    dest_path = url_decode(dest_path);
-                    size_t q = dest_path.find('?');
-                    if (q != std::string::npos) {
-                        dest_path = dest_path.substr(0, q);
-                    }
-                    if (dest_path.size() > 1 && dest_path.back() == '/') {
-                        dest_path.pop_back();
-                    }
-
-                    if (!is_valid_83_path(dest_path)) {
-                        std::cerr << "[WebDAV] Rejected COPY: Destination path component violates strict 8.3 filename conventions: " << dest_path << std::endl;
-                        http::response<http::string_body> res{http::status::bad_request, req.version()};
-                        res.set(http::field::connection, "close");
-                        res.body() = "Error: Destination path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).";
-                        res.prepare_payload();
-                        http::write(socket, res, ec);
-                    } else {
-                        FileEntry source_entry;
-                        if (!get_item_metadata(path, source_entry)) {
-                            http::response<http::empty_body> res{http::status::not_found, req.version()};
-                            res.set(http::field::connection, "close");
-                            res.prepare_payload();
-                            http::write(socket, res, ec);
-                        } else {
-                            FileEntry dest_entry;
-                            const std::string requested_dest = dest_path;
-                            bool dest_exists = get_item_metadata(dest_path, dest_entry);
-                            // Lookups ignore case, so "a.sav" -> "A.SAV" finds the source itself.
-                            const bool same_item = dest_exists && dest_path == path;
-                            std::string overwrite{req["Overwrite"]};
-                            if (same_item && (method == "COPY" || requested_dest == path)) {
-                                http::response<http::empty_body> res{http::status::forbidden, req.version()};
-                                res.set(http::field::connection, "close");
-                                res.prepare_payload();
-                                http::write(socket, res, ec);
-                            } else if (dest_exists && !same_item && overwrite == "F") {
-                                http::response<http::empty_body> res{http::status::precondition_failed, req.version()};
-                                res.set(http::field::connection, "close");
-                                res.prepare_payload();
-                                http::write(socket, res, ec);
-                            } else {
-                                std::string temp_filename = "ftx_webdav_copy_temp.bin";
-                                int download_status = xfer::DoSdDownload(path.c_str(), temp_filename.c_str());
-                                int upload_status = 0;
-                                if (download_status == 1) {
-                                    if (dest_exists) {
-                                        int remove_status = xfer::DoRemove(dest_path.c_str());
-                                        if (remove_status != 1) {
-                                            xfer::DoRmdir(dest_path.c_str());
-                                        }
-                                    }
-                                    upload_status = xfer::DoSdUpload(temp_filename.c_str(), requested_dest.c_str());
-                                }
-                                std::remove(temp_filename.c_str());
-
-                                if (download_status == 1 && upload_status == 1) {
-                                    http::status response_status = dest_exists ? http::status::no_content : http::status::created;
-                                    http::response<http::empty_body> res{response_status, req.version()};
-                                    res.set(http::field::connection, "close");
-                                    res.prepare_payload();
-                                    http::write(socket, res, ec);
-                                } else {
-                                    http::response<http::empty_body> res{http::status::internal_server_error, req.version()};
-                                    res.set(http::field::connection, "close");
-                                    res.prepare_payload();
-                                    http::write(socket, res, ec);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else {
-                http::response<http::empty_body> res{http::status::method_not_allowed, req.version()};
-                res.set(http::field::connection, "close");
-                res.prepare_payload();
-                http::write(socket, res, ec);
-            }
+            Response res = handle_request(parser.get());
+            res.set(http::field::connection, "close");
+            res.prepare_payload();
+            http::write(socket, res, ec);
         }
     } catch (const std::exception& e) {
         std::cerr << "[WebDAV] Exception: " << e.what() << std::endl;

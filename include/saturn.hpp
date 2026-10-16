@@ -44,4 +44,12 @@ constexpr std::size_t bios_size = 524288;
  */
 constexpr uint32_t bios_address = 0x00000000;
 
+/// USB dev cart firmware function codes (from Anders Montonen's usbcart firmware).
+enum UsbDcFunc : unsigned char {
+    USBDC_FUNC_DOWNLOAD = 1,
+    USBDC_FUNC_UPLOAD = 2,
+    USBDC_FUNC_EXEC = 3,
+    USBDC_FUNC_EXEC_EXT = 6,
+};
+
 } // namespace saturn

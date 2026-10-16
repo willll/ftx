@@ -158,7 +158,6 @@ endif()
 
 target_include_directories(ftx
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/satcom_lib
   PRIVATE ${LIBFTDI1_INCLUDE_DIRS}
 )
 

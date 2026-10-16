@@ -54,7 +54,6 @@
 #include "saturn.hpp"
 #include "xfer.hpp"
 
-#include "sc_common.h"
 
 namespace xfer
 {
@@ -505,7 +504,7 @@ namespace xfer
 
     // Step 4: If the command is for execution, append four zero bytes for reset
     // flag
-    if (USBDC_FUNC_EXEC_EXT == cmd)
+    if (saturn::USBDC_FUNC_EXEC_EXT == cmd)
     {
       SendBuf[i++] = 0x00;
       SendBuf[i++] = 0x00;
@@ -632,12 +631,15 @@ namespace xfer
       return 0;
     }
 
+    // Keep reading after a cut-short reply: the end-of-listing packet must be
+    // consumed, or the next command would read it as its own reply.
+    bool truncated = false;
     for (;;)
     {
-      if (reply.payload.size() >= LIST_REPLY_CAP)
+      if (reply.payload.size() >= LIST_REPLY_CAP && !truncated)
       {
         std::cerr << "[DoListStr] Listing of '" << path << "' was cut short by the device (too many entries)." << std::endl;
-        return 0;
+        truncated = true;
       }
       if (!reply.payload.empty())
       {
@@ -658,7 +660,7 @@ namespace xfer
       if (reply.payload.empty())
       {
         // Empty payload + OK = explicit end-of-listing sentinel from device.
-        return 1;
+        return truncated ? 0 : 1;
       }
 
       // Try to read the next packet.  Use a short inter-packet timeout (200 ms)
@@ -668,7 +670,7 @@ namespace xfer
       if (rc == 0)
       {
         // Timeout: no more packets — listing is complete.
-        return 1;
+        return truncated ? 0 : 1;
       }
       if (rc < 0)
       {
@@ -738,7 +740,7 @@ namespace xfer
     auto before = std::chrono::steady_clock::now();
 
     cdbg << "[DoDownload] Sending download command..." << std::endl;
-    status = xfer::SendCommandWithAddressAndLength(USBDC_FUNC_DOWNLOAD, address, size);
+    status = xfer::SendCommandWithAddressAndLength(saturn::USBDC_FUNC_DOWNLOAD, address, size);
     if (status < 0)
     {
       std::cerr << "[DoDownload] Send download command error: " << ftdi_get_error_string(&ftdi::g_Device) << std::endl;
@@ -772,6 +774,12 @@ namespace xfer
       }
     }
 
+    if (received < size)
+    {
+      std::cerr << "[DoDownload] Interrupted." << std::endl;
+      return 0;
+    }
+
     cdbg << "[DoDownload] Waiting for checksum byte..." << std::endl;
     do
     {
@@ -782,6 +790,11 @@ namespace xfer
         return 0;
       }
     } while (status == 0 && !ftdi::g_interrupt_flag);
+    if (status == 0)
+    {
+      std::cerr << "[DoDownload] Interrupted." << std::endl;
+      return 0;
+    }
 
     auto after = std::chrono::steady_clock::now();
     cdbg << "[DoDownload] Data received. Calculating performance..." << std::endl;
@@ -835,12 +848,12 @@ namespace xfer
     if (execute)
     {
       cdbg << "[" << functnName << "] Uploading and executing at address 0x" << std::hex << address << std::dec << std::endl;
-      SendBuf[0] = USBDC_FUNC_EXEC_EXT;
+      SendBuf[0] = saturn::USBDC_FUNC_EXEC_EXT;
     }
     else
     {
       cdbg << "[" << functnName << "] Uploading to address 0x" << std::hex << address << std::dec << std::endl;
-      SendBuf[0] = USBDC_FUNC_UPLOAD;
+      SendBuf[0] = saturn::USBDC_FUNC_UPLOAD;
     }
 
     int status = xfer::SendCommandWithAddressAndLength(SendBuf[0], address, size);
@@ -865,7 +878,7 @@ namespace xfer
           sent += write_status;
           cdbg << "[" << functnName << "] Sent chunk..." << std::endl;
         }
-        return true;
+        return sent == len;
     }))
     {
         return 0;
@@ -888,6 +901,12 @@ namespace xfer
         return 0;
       }
     } while (status == 0 && !ftdi::g_interrupt_flag);
+    if (status == 0)
+    {
+      // Interrupted: RecvBuf[0] would be a stale byte, not the device's answer.
+      std::cerr << "[" << functnName << "] Interrupted." << std::endl;
+      return 0;
+    }
 
     if (RecvBuf[0] != 0)
     {
@@ -910,7 +929,7 @@ namespace xfer
               << std::dec << std::endl;
 
     // Issue the standard execution command followed by the 4-byte big-endian address
-    SendBuf[0] = USBDC_FUNC_EXEC;
+    SendBuf[0] = saturn::USBDC_FUNC_EXEC;
     SendBuf[1] = static_cast<unsigned char>(address >> 24);
     SendBuf[2] = static_cast<unsigned char>(address >> 16);
     SendBuf[3] = static_cast<unsigned char>(address >> 8);
@@ -1082,7 +1101,7 @@ namespace xfer
         }
         sent += static_cast<size_t>(status);
       }
-      return true;
+      return sent == length;
     };
 
     auto read_one = [](unsigned char *outByte) -> bool
@@ -1099,7 +1118,7 @@ namespace xfer
         }
       } while (status == 0 && !ftdi::g_interrupt_flag);
 
-      return true;
+      return status > 0; // 0: interrupted before the device answered
     };
 
     SdUploadTarget target;
