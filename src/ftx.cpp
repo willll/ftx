@@ -178,6 +178,27 @@ struct CommandLineArgs {
 };
 
 /**
+ * @brief Parse a TCP port number (1-65535, decimal), or exit with an error.
+ * @param text Port as typed on the command line.
+ * @param what Which server the port is for, used in the error message.
+ * @return The port number.
+ */
+static uint16_t parse_port(const std::string& text, const char* what) {
+    std::size_t used = 0;
+    unsigned long port = 0;
+    try {
+        port = std::stoul(text, &used, 10);
+    } catch (const std::exception&) {
+        used = 0;
+    }
+    if (used == 0 || used != text.size() || port < 1 || port > 65535) {
+        std::cerr << "Invalid " << what << " port '" << text << "' (expected 1-65535)" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    return static_cast<uint16_t>(port);
+}
+
+/**
  * @brief Parse command line arguments using Boost.Program_options.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -319,23 +340,11 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         }
         if (vm.count("g")) {
             args.tcp_proxy = true;
-            std::string port_str = vm["g"].as<std::string>();
-            try {
-                args.tcp_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
-            } catch (const std::exception& e) {
-                std::cerr << "Error parsing GDB port: " << e.what() << std::endl;
-                args.tcp_port = 1234;
-            }
+            args.tcp_port = parse_port(vm["g"].as<std::string>(), "GDB");
         }
         if (vm.count("webdav")) {
             args.webdav = true;
-            std::string port_str = vm["webdav"].as<std::string>();
-            try {
-                args.webdav_port = static_cast<uint16_t>(std::stoul(port_str, nullptr, 0));
-            } catch (const std::exception& e) {
-                std::cerr << "Error parsing WebDAV port: " << e.what() << std::endl;
-                args.webdav_port = 8080;
-            }
+            args.webdav_port = parse_port(vm["webdav"].as<std::string>(), "WebDAV");
         }
         if (vm.count("vv") || vm.count("verbose")) {
             args.verbose_level = 2;

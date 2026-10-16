@@ -11,7 +11,6 @@
 #include "xfer.hpp"
 #include "log.hpp"
 #include <iostream>
-#include <fstream>
 #include <sstream>
 #include <vector>
 #include <string>
@@ -310,8 +309,12 @@ std::string normalize_path(const std::string& target) {
     return path;
 }
 
-using Request = http::request<http::string_body>;
+// Request bodies are streamed into kUploadFile and file downloads streamed back out of
+// kDownloadFile, so a transfer never has to fit in memory.
+using Request = http::request<http::file_body>;
 using Response = http::response<http::string_body>;
+const char* const kUploadFile = "ftx_webdav_temp.bin";
+const char* const kDownloadFile = "ftx_webdav_get_temp.bin";
 
 Response make_response(const Request& req, http::status status, std::string body = {}) {
     Response res{status, req.version()};
@@ -378,7 +381,8 @@ Response move_or_copy(const Request& req, const std::string& method, std::string
 }
 
 /// Map one WebDAV request onto cartridge file commands.
-Response handle_request(const Request& req) {
+/// @param send_file Set to a file whose contents must be sent as the response body.
+Response handle_request(Request& req, std::string& send_file) {
     const std::string method{req.method_string()};
     std::string path = normalize_path(std::string(req.target()));
     std::cout << "[WebDAV] Request: " << method << " " << path << std::endl;
@@ -417,16 +421,8 @@ Response handle_request(const Request& req) {
             return make_response(req, http::status::bad_request,
                 "Error: Path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).");
         }
-        const char* temp_filename = "ftx_webdav_temp.bin";
-        {
-            std::ofstream temp_file(temp_filename, std::ios::binary);
-            if (!temp_file) {
-                return make_response(req, http::status::internal_server_error);
-            }
-            temp_file.write(req.body().data(), req.body().size());
-        }
-        int status = xfer::DoSdUpload(temp_filename, path.c_str());
-        std::remove(temp_filename);
+        req.body().close(); // flush the streamed body before uploading it
+        int status = xfer::DoSdUpload(kUploadFile, path.c_str());
         return make_response(req, status == 1 ? http::status::created : http::status::internal_server_error);
     }
     if (method == "DELETE") {
@@ -445,20 +441,11 @@ Response handle_request(const Request& req) {
         if (!get_item_metadata(path, entry) || entry.is_dir) {
             return make_response(req, http::status::not_found);
         }
-        const char* temp_filename = "ftx_webdav_get_temp.bin";
-        if (xfer::DoSdDownload(path.c_str(), temp_filename) != 1) {
-            std::remove(temp_filename);
+        if (xfer::DoSdDownload(path.c_str(), kDownloadFile) != 1) {
             return make_response(req, http::status::internal_server_error);
         }
-        std::ifstream file(temp_filename, std::ios::binary);
-        if (!file) {
-            std::remove(temp_filename);
-            return make_response(req, http::status::internal_server_error);
-        }
-        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        file.close();
-        std::remove(temp_filename);
-        Response res = make_response(req, http::status::ok, std::move(content));
+        send_file = kDownloadFile;
+        Response res = make_response(req, http::status::ok);
         res.set(http::field::content_type, "application/octet-stream");
         return res;
     }
@@ -519,8 +506,13 @@ int DoWebDavServer(uint16_t port) {
             }
 
             beast::flat_buffer buffer;
-            http::request_parser<http::string_body> parser;
+            http::request_parser<http::file_body> parser;
             parser.body_limit(std::numeric_limits<std::uint32_t>::max()); // FAT32's file size limit; Beast defaults to 1 MB
+            parser.get().body().open(kUploadFile, beast::file_mode::write, ec);
+            if (ec) {
+                std::cerr << "[WebDAV] Cannot create " << kUploadFile << ": " << ec.message() << std::endl;
+                continue;
+            }
 
             // Read with a deadline: a client that connects and sends nothing must not block the server or Ctrl-C.
             bool done = false;
@@ -547,10 +539,35 @@ int DoWebDavServer(uint16_t port) {
                 continue;
             }
 
-            Response res = handle_request(parser.get());
+            std::string send_file;
+            Response res = handle_request(parser.get(), send_file);
+            parser.get().body().close();
+            std::remove(kUploadFile);
             res.set(http::field::connection, "close");
-            res.prepare_payload();
-            http::write(socket, res, ec);
+            if (send_file.empty()) {
+                res.prepare_payload();
+                http::write(socket, res, ec);
+            } else {
+                {
+                    http::response<http::file_body> file_res;
+                    file_res.base() = res.base();
+                    file_res.body().open(send_file.c_str(), beast::file_mode::scan, ec);
+                    if (!ec) {
+                        file_res.prepare_payload();
+                        http::write(socket, file_res, ec);
+                    } else {
+                        Response error_res{http::status::internal_server_error, res.version()};
+                        error_res.set(http::field::connection, "close");
+                        error_res.prepare_payload();
+                        boost::system::error_code ignored;
+                        http::write(socket, error_res, ignored);
+                    }
+                }
+                std::remove(send_file.c_str()); // after the file is closed (Windows can't delete open files)
+                if (ec) {
+                    std::cerr << "[WebDAV] Sending " << send_file << " failed: " << ec.message() << std::endl;
+                }
+            }
         }
     } catch (const std::exception& e) {
         std::cerr << "[WebDAV] Exception: " << e.what() << std::endl;

@@ -107,7 +107,7 @@ make
 
 ### Tests
 
-`tests/fake_saturn` checks the commands that write or delete files (`--get`, `--sync`, the WebDAV server, interrupted uploads) without hardware. `fakesat.c` is an `LD_PRELOAD` stand-in for libftdi that answers the cartridge's remote I/O commands from a host folder. It needs a dynamically linked ftx (not `-DBUILD_STATIC=ON`) on Linux:
+`tests/fake_saturn` checks the commands that write or delete files (`--get`, `--sync`, the WebDAV server, interrupted uploads) and the GDB proxy's session handling, without hardware. `fakesat.c` is an `LD_PRELOAD` stand-in for libftdi that answers the cartridge's remote I/O commands from a host folder. It needs a dynamically linked ftx (not `-DBUILD_STATIC=ON`) on Linux:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build

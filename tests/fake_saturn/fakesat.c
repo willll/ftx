@@ -7,6 +7,8 @@
  *   FAKE_CUT=N             a DOWNLOAD stops after N data bytes (reads fail from then on)
  *   FAKE_SINK=1            swallow every write and never answer (for interrupt tests)
  *   FAKE_WRITE_DELAY_US=N  sleep N microseconds in every write
+ *   FAKE_ECHO_DELAY_MS=N   act as a plain target for ftx -g: echo every write back N ms later
+ *   FAKE_READ_FAIL=1       every read fails, like a USB handle that died
  *
  * Paths starting with "sdraw:" are logged as "[fakesat] RAW ..." instead of touching sectors.
  */
@@ -28,6 +30,27 @@ static size_t in_len, out_len, out_pos, cut_at = (size_t)-1;
 static char up_path[MAX_PATH];
 static unsigned char up_buf[1 << 22];
 static size_t up_len, up_need, up_size;
+static unsigned char echo_buf[1 << 16];
+static size_t echo_len;
+static struct timespec echo_ready;
+
+static long ms_until(const struct timespec *t)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (t->tv_sec - now.tv_sec) * 1000 + (t->tv_nsec - now.tv_nsec) / 1000000;
+}
+
+/* Echoed bytes "arrive" in the receive buffer once their delay has passed. */
+static void deliver_echo(void)
+{
+    if (echo_len && ms_until(&echo_ready) <= 0)
+    {
+        memcpy(out + out_len, echo_buf, echo_len);
+        out_len += echo_len;
+        echo_len = 0;
+    }
+}
 
 static unsigned char crc8(const unsigned char *p, size_t n)
 {
@@ -139,6 +162,20 @@ int ftdi_write_data(struct ftdi_context *f, const unsigned char *buf, int size)
     (void)f;
     if (getenv("FAKE_WRITE_DELAY_US")) usleep((useconds_t)atol(getenv("FAKE_WRITE_DELAY_US")));
     if (getenv("FAKE_SINK")) return size;
+    if (getenv("FAKE_ECHO_DELAY_MS"))
+    {
+        if (!echo_len)
+        {
+            clock_gettime(CLOCK_MONOTONIC, &echo_ready);
+            long ms = atol(getenv("FAKE_ECHO_DELAY_MS"));
+            echo_ready.tv_sec += ms / 1000;
+            echo_ready.tv_nsec += (ms % 1000) * 1000000;
+            if (echo_ready.tv_nsec >= 1000000000) { echo_ready.tv_sec++; echo_ready.tv_nsec -= 1000000000; }
+        }
+        memcpy(echo_buf + echo_len, buf, (size_t)size);
+        echo_len += (size_t)size;
+        return size;
+    }
 
     size_t i = 0;
     while (up_need && i < (size_t)size) /* upload data bypasses command parsing */
@@ -177,6 +214,8 @@ int ftdi_write_data(struct ftdi_context *f, const unsigned char *buf, int size)
 int ftdi_read_data(struct ftdi_context *f, unsigned char *buf, int size)
 {
     (void)f;
+    if (getenv("FAKE_READ_FAIL")) return -1;
+    deliver_echo();
     if (out_pos >= cut_at) return -1;
     size_t avail = out_len - out_pos;
     if (cut_at != (size_t)-1 && cut_at - out_pos < avail) avail = cut_at - out_pos;
@@ -194,7 +233,10 @@ int ftdi_usb_open_desc(struct ftdi_context *f, int v, int p, const char *d, cons
 int ftdi_usb_close(struct ftdi_context *f) { (void)f; return 0; }
 void ftdi_deinit(struct ftdi_context *f) { (void)f; }
 int ftdi_usb_reset(struct ftdi_context *f) { (void)f; return 0; }
-int ftdi_tcioflush(struct ftdi_context *f) { (void)f; return 0; }
+/* Receive-buffer flushes drop what has arrived but not been read; transmit is never buffered here. */
+int ftdi_tciflush(struct ftdi_context *f) { (void)f; deliver_echo(); out_len = out_pos = 0; return 0; }
+int ftdi_tcoflush(struct ftdi_context *f) { (void)f; return 0; }
+int ftdi_tcioflush(struct ftdi_context *f) { (void)f; echo_len = 0; out_len = out_pos = 0; return 0; }
 int ftdi_set_bitmode(struct ftdi_context *f, unsigned char m, unsigned char b) { (void)f; (void)m; (void)b; return 0; }
 int ftdi_read_data_set_chunksize(struct ftdi_context *f, unsigned int c) { (void)f; (void)c; return 0; }
 int ftdi_write_data_set_chunksize(struct ftdi_context *f, unsigned int c) { (void)f; (void)c; return 0; }

@@ -558,61 +558,12 @@ namespace xfer
    */
   int DoList(const char *path)
   {
-    if (!SendRemoteIoCommand(RemoteIoCommand::LIST, path))
-    {
-      return 0;
-    }
-
-    // First packet uses the full timeout so the device has time to respond.
-    RemoteIoReply reply;
-    if (!ReadRemoteIoReply(reply))
-    {
-      return 0;
-    }
-
-    for (;;)
-    {
-      if (!reply.payload.empty())
-      {
-        std::cout << reply.payload;
-        if (reply.payload.back() != '\n')
-        {
-          std::cout << '\n';
-        }
-        if (reply.payload.size() >= LIST_REPLY_CAP)
-        {
-          std::cerr << "[DoList] Warning: the device cut this listing short; some entries may be missing." << std::endl;
-        }
-      }
-
-      if (reply.status != RemoteIoStatus::OK)
-      {
-        std::cerr << "[DoList] Device returned status "
-                  << static_cast<int>(reply.status) << std::endl;
-        return 0;
-      }
-
-      if (reply.payload.empty())
-      {
-        // Empty payload + OK = explicit end-of-listing sentinel from device.
-        return 1;
-      }
-
-      // Try to read the next packet.  Use a short inter-packet timeout (200 ms)
-      // so that a single-packet response exits promptly instead of hanging for
-      // the full 5-second idle timeout.
-      const int rc = TryReadRemoteIoReply(reply, 200);
-      if (rc == 0)
-      {
-        // Timeout: no more packets — listing is complete.
-        return 1;
-      }
-      if (rc < 0)
-      {
-        return 0;
-      }
-    }
+    std::string listing;
+    const int status = DoListStr(path, listing);
+    std::cout << listing; // also shows the device's error text, or a cut-short listing
+    return status;
   }
+
 
   /**
    * @copydoc xfer::DoListStr

@@ -2,8 +2,8 @@
 
 usage: python3 test_ftx.py <ftx binary, dynamically linked to libftdi> <fakesat.so>
 
-Covers the code paths that write or delete files: --get, --sync, the WebDAV server,
-and interrupted uploads. Exits non-zero if any check fails.
+Covers the code paths that write or delete files (--get, --sync, the WebDAV server,
+interrupted uploads) and the GDB proxy's session handling. Exits non-zero if any check fails.
 """
 import os
 import shutil
@@ -111,6 +111,61 @@ p = subprocess.Popen([FTX, "-u", os.path.join(loc, "prog.bin"), "0x6004000"],
 time.sleep(0.5)
 p.send_signal(signal.SIGINT)
 check("Ctrl-C during an upload exits with an error", p.wait(30) != 0)
+
+
+# --- GDB proxy (ftx -g) ----------------------------------------------------------------
+GDB_PORT = PORT + 1
+
+
+def start_proxy(**extra):
+    proc = subprocess.Popen([FTX, "-g", str(GDB_PORT)], env=env(**extra),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(100):
+        try:
+            return proc, socket.create_connection(("127.0.0.1", GDB_PORT), 0.1)
+        except OSError:
+            time.sleep(0.1)
+    proc.kill()
+    raise SystemExit("GDB proxy did not start")
+
+
+def read_for(sock, seconds):
+    sock.settimeout(0.1)
+    data, end = b"", time.time() + seconds
+    while time.time() < end:
+        try:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        except socket.timeout:
+            pass
+    return data
+
+
+# The target answers 300 ms late, after client A has already hung up.
+proxy, client_a = start_proxy(FAKE_ECHO_DELAY_MS=300)
+client_a.sendall(b"$stale#00")
+client_a.close()
+time.sleep(0.8)
+client_b = socket.create_connection(("127.0.0.1", GDB_PORT), 2)
+early = read_for(client_b, 0.5)
+client_b.sendall(b"$fresh#00")
+answer = read_for(client_b, 1.5)
+client_b.close()
+proxy.send_signal(signal.SIGINT)
+proxy.wait(10)
+check("GDB proxy: a late reply for the previous client never reaches the next one",
+      early == b"" and answer == b"$fresh#00", "got %r then %r" % (early, answer))
+
+proxy, client = start_proxy(FAKE_READ_FAIL=1)
+try:
+    rc = proxy.wait(5)
+except subprocess.TimeoutExpired:
+    proxy.kill()
+    rc = None
+client.close()
+check("GDB proxy: exits with an error when the cartridge stops answering", rc == 1, "exit code %r" % rc)
 
 
 # --- WebDAV ----------------------------------------------------------------------------
