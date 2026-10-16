@@ -670,10 +670,43 @@ namespace xfer
     return ExecuteRemoteIoCommand(RemoteIoCommand::CRC, filename, "DoCrc");
   }
 
+  /// Temporary suffix for downloads in progress; the file only gets its real name once verified.
+  static const char kDownloadPartSuffix[] = ".ftxpart";
+  /// Suffix of the local copy kept when a bidirectional sync replaces a local file.
+  static const char kSyncBackupSuffix[] = ".ftxbak";
+
   /**
-   * @copydoc xfer::DoDownload
+   * @brief Run @p download into "<dst>.ftxpart" and rename it over @p dst only if it succeeds,
+   * so a failed or interrupted transfer never truncates an existing file.
+   * @param download Callable taking the temporary path and returning 1 on success.
    */
-  int DoDownload(const char *filename, uint32_t address, std::size_t size)
+  template <typename Download>
+  static int DownloadViaPartFile(const char *dst, const char *label, Download download)
+  {
+    const std::filesystem::path target(dst);
+    std::filesystem::path part = target;
+    part += kDownloadPartSuffix;
+
+    std::error_code ec;
+    int result = download(part.string().c_str());
+    if (result == 1)
+    {
+      std::filesystem::rename(part, target, ec);
+      if (ec)
+      {
+        std::cerr << "[" << label << "] Can't replace '" << dst << "': " << ec.message() << std::endl;
+        result = 0;
+      }
+    }
+    if (result != 1)
+    {
+      std::filesystem::remove(part, ec);
+    }
+    return result;
+  }
+
+  /// Download Saturn memory into @p filename, truncating it first.
+  static int DownloadMemoryToFile(const char *filename, uint32_t address, std::size_t size)
   {
     cdbg << "[DoDownload] Starting download: file='" << filename
          << "', address=0x" << std::hex << address << ", size=" << std::dec << size << std::endl;
@@ -762,6 +795,16 @@ namespace xfer
     cdbg << "[DoDownload] Download complete." << std::endl;
     return 1;
   }
+  /**
+   * @copydoc xfer::DoDownload
+   */
+  int DoDownload(const char *filename, uint32_t address, std::size_t size)
+  {
+    return DownloadViaPartFile(filename, "DoDownload", [&](const char *part) {
+      return DownloadMemoryToFile(part, address, size);
+    });
+  }
+
 
   /**
    * @copydoc xfer::DoUpload
@@ -1176,11 +1219,6 @@ namespace xfer
     return (result == 0x00) ? 1 : 0;
   }
 
-  /// Temporary suffix for downloads in progress; the file only gets its real name once verified.
-  static const char kDownloadPartSuffix[] = ".ftxpart";
-  /// Suffix of the local copy kept when a bidirectional sync replaces a local file.
-  static const char kSyncBackupSuffix[] = ".ftxbak";
-
   /**
    * @brief Download a Saturn SD file into @p host_filename, truncating it first.
    * @details Downloads files from the Sega Saturn SD card over HostIO.
@@ -1292,26 +1330,9 @@ namespace xfer
       return 0;
     }
 
-    const std::filesystem::path dst(host_filename);
-    std::filesystem::path part = dst;
-    part += kDownloadPartSuffix;
-
-    std::error_code ec;
-    int result = DownloadToFile(saturn_sd_path, part.string().c_str());
-    if (result == 1)
-    {
-      std::filesystem::rename(part, dst, ec);
-      if (ec)
-      {
-        std::cerr << "[DoSdDownload] Can't replace '" << host_filename << "': " << ec.message() << std::endl;
-        result = 0;
-      }
-    }
-    if (result != 1)
-    {
-      std::filesystem::remove(part, ec);
-    }
-    return result;
+    return DownloadViaPartFile(host_filename, "DoSdDownload", [&](const char *part) {
+      return DownloadToFile(saturn_sd_path, part);
+    });
   }
 
   struct SdSyncEntry {

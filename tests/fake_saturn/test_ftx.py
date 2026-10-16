@@ -112,6 +112,15 @@ time.sleep(0.5)
 p.send_signal(signal.SIGINT)
 check("Ctrl-C during an upload exits with an error", p.wait(30) != 0)
 
+put(loc, "bios.bin", b"GOOD-OLD-BIOS-DUMP")
+p = subprocess.Popen([FTX, "-D", os.path.join(loc, "bios.bin")], env=env(FAKE_SINK=1),
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(0.5)
+p.send_signal(signal.SIGINT)
+check("an interrupted BIOS dump keeps the previous file",
+      p.wait(30) != 0 and get(loc, "bios.bin") == b"GOOD-OLD-BIOS-DUMP"
+      and not os.path.exists(os.path.join(loc, "bios.bin.ftxpart")))
+
 
 # --- GDB proxy (ftx -g) ----------------------------------------------------------------
 GDB_PORT = PORT + 1
@@ -169,14 +178,14 @@ check("GDB proxy: exits with an error when the cartridge stops answering", rc ==
 
 
 # --- WebDAV ----------------------------------------------------------------------------
-def start_server(**extra):
+def start_server(cwd=None, **extra):
     try:
         socket.create_connection(("127.0.0.1", PORT), 0.2).close()
         raise SystemExit("port %d is already in use (a leftover ftx -wd?)" % PORT)
     except OSError:
         pass
     log = open(os.path.join(work, "server.log"), "a")
-    proc = subprocess.Popen([FTX, "-wd", str(PORT)], env=env(**extra), stdout=log, stderr=log)
+    proc = subprocess.Popen([FTX, "-wd", str(PORT)], env=env(**extra), stdout=log, stderr=log, cwd=cwd)
     for _ in range(100):
         try:
             socket.create_connection(("127.0.0.1", PORT), 0.1).close()
@@ -225,8 +234,8 @@ servers = []
 _start = start_server
 
 
-def start_server(**extra):
-    proc = _start(**extra)
+def start_server(cwd=None, **extra):
+    proc = _start(cwd, **extra)
     servers.append(proc)
     return proc
 
@@ -288,11 +297,36 @@ try:
     idle.close()
     stop_server(srv)
 
+    srv = start_server()
+    put(sd, "A+B.BIN", b"PLUS")
+    st, body = http("GET", "/A+B.BIN")
+    check("WebDAV: '+' in a file name is kept", st == 200 and body == b"PLUS", "status %d" % st)
+
+    for name in ("tree/ONE.SAV", "tree/SUB/TWO.SAV"):
+        put(sd, name, b"x")
+    st, _ = http("DELETE", "/tree")
+    check("WebDAV: DELETE removes a folder with files in it", st == 204 and not os.path.exists(os.path.join(sd, "tree")),
+          "status %d" % st)
+    st, _ = http("DELETE", "/")
+    check("WebDAV: DELETE / is refused", st != 204 and get(sd, "a.sav") == b"AAAA", "status %d" % st)
+    stop_server(srv)
+
     put(sd, "dst.sav", b"DEST")
     srv = start_server(FAKE_CUT=3)
     st, _ = http("COPY", "/src.sav", {"Destination": "/dst.sav"})
     check("WebDAV: COPY with a failed download keeps the destination", st == 500 and get(sd, "dst.sav") == b"DEST")
     stop_server(srv)
+
+    readonly = os.path.join(work, "readonly")
+    os.makedirs(readonly)
+    os.chmod(readonly, 0o555)
+    srv = start_server(cwd=readonly)
+    st, _ = http("OPTIONS", "/")
+    st2, body = http("GET", "/a.sav")
+    check("WebDAV: works when started from a read-only folder", st == 200 and (st2, body) == (200, b"AAAA"),
+          "OPTIONS %d, GET %d" % (st, st2))
+    stop_server(srv)
+    os.chmod(readonly, 0o755)
 finally:
     for proc in servers:
         if proc.poll() is None:

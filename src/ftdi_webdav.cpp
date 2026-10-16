@@ -5,6 +5,9 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <process.h>
+#else
+#include <unistd.h>
 #endif
 
 #include "ftdi.hpp"
@@ -20,6 +23,7 @@
 #include <thread>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 
 #include <boost/algorithm/string.hpp>
@@ -64,8 +68,6 @@ std::string url_decode(const std::string& src) {
                 ret += ch;
                 pos += 2;
             }
-        } else if (src[pos] == '+') {
-            ret += ' ';
         } else {
             ret += src[pos];
         }
@@ -309,12 +311,26 @@ std::string normalize_path(const std::string& target) {
     return path;
 }
 
-// Request bodies are streamed into kUploadFile and file downloads streamed back out of
-// kDownloadFile, so a transfer never has to fit in memory.
+// Request bodies are streamed into upload_file and file downloads streamed back out of
+// download_file, so a transfer never has to fit in memory. Set by DoWebDavServer.
 using Request = http::request<http::file_body>;
 using Response = http::response<http::string_body>;
-const char* const kUploadFile = "ftx_webdav_temp.bin";
-const char* const kDownloadFile = "ftx_webdav_get_temp.bin";
+std::string upload_file, download_file, copy_file;
+
+long process_id() {
+#ifdef _WIN32
+    return _getpid();
+#else
+    return static_cast<long>(getpid());
+#endif
+}
+
+/// A temp file in the system temp folder (the working folder may be read-only), named with
+/// the process ID so two servers never share one.
+std::string temp_path(const char* name) {
+    return (std::filesystem::temp_directory_path() /
+            (std::string("ftx_webdav_") + name + "_" + std::to_string(process_id()) + ".bin")).string();
+}
 
 Response make_response(const Request& req, http::status status, std::string body = {}) {
     Response res{status, req.version()};
@@ -323,9 +339,25 @@ Response make_response(const Request& req, http::status status, std::string body
     return res;
 }
 
-/// Delete a file, or an (empty) directory if it is one. Returns 1 on success.
+/// Delete a file, or a directory with everything in it (WebDAV DELETE is recursive, while
+/// FatFs only removes empty directories). Never the root. Returns 1 on success.
 int remove_item(const std::string& path) {
-    return (xfer::DoRemove(path.c_str()) == 1) ? 1 : xfer::DoRmdir(path.c_str());
+    if (path.empty() || path == "/") {
+        return 0;
+    }
+    if (xfer::DoRemove(path.c_str()) == 1) {
+        return 1; // a file or an empty directory
+    }
+    std::string listing;
+    if (xfer::DoListStr(("-l " + path).c_str(), listing) != 1) {
+        return 0;
+    }
+    for (const FileEntry& entry : parse_directory_listing(listing)) {
+        if (remove_item(path + "/" + entry.name) != 1) {
+            return 0;
+        }
+    }
+    return xfer::DoRmdir(path.c_str());
 }
 
 Response move_or_copy(const Request& req, const std::string& method, std::string path) {
@@ -363,7 +395,7 @@ Response move_or_copy(const Request& req, const std::string& method, std::string
         }
         status = xfer::DoRename(path.c_str(), requested_dest.c_str());
     } else {
-        const char* temp_filename = "ftx_webdav_copy_temp.bin";
+        const char* temp_filename = copy_file.c_str();
         status = xfer::DoSdDownload(path.c_str(), temp_filename);
         if (status == 1) {
             // Only touch the destination once the source is safely on the host.
@@ -422,7 +454,7 @@ Response handle_request(Request& req, std::string& send_file) {
                 "Error: Path violates strict 8.3 filename conventions (max 8 characters for name, 3 characters for extension).");
         }
         req.body().close(); // flush the streamed body before uploading it
-        int status = xfer::DoSdUpload(kUploadFile, path.c_str());
+        int status = xfer::DoSdUpload(upload_file.c_str(), path.c_str());
         return make_response(req, status == 1 ? http::status::created : http::status::internal_server_error);
     }
     if (method == "DELETE") {
@@ -441,10 +473,10 @@ Response handle_request(Request& req, std::string& send_file) {
         if (!get_item_metadata(path, entry) || entry.is_dir) {
             return make_response(req, http::status::not_found);
         }
-        if (xfer::DoSdDownload(path.c_str(), kDownloadFile) != 1) {
+        if (xfer::DoSdDownload(path.c_str(), download_file.c_str()) != 1) {
             return make_response(req, http::status::internal_server_error);
         }
-        send_file = kDownloadFile;
+        send_file = download_file;
         Response res = make_response(req, http::status::ok);
         res.set(http::field::content_type, "application/octet-stream");
         return res;
@@ -480,6 +512,10 @@ namespace ftdi {
  */
 int DoWebDavServer(uint16_t port) {
     try {
+        upload_file = temp_path("upload");
+        download_file = temp_path("download");
+        copy_file = temp_path("copy");
+
         net::io_context ioc{1};
         tcp::acceptor acceptor{ioc};
         acceptor.open(tcp::v4());
@@ -508,9 +544,9 @@ int DoWebDavServer(uint16_t port) {
             beast::flat_buffer buffer;
             http::request_parser<http::file_body> parser;
             parser.body_limit(std::numeric_limits<std::uint32_t>::max()); // FAT32's file size limit; Beast defaults to 1 MB
-            parser.get().body().open(kUploadFile, beast::file_mode::write, ec);
+            parser.get().body().open(upload_file.c_str(), beast::file_mode::write, ec);
             if (ec) {
-                std::cerr << "[WebDAV] Cannot create " << kUploadFile << ": " << ec.message() << std::endl;
+                std::cerr << "[WebDAV] Cannot create " << upload_file << ": " << ec.message() << std::endl;
                 continue;
             }
 
@@ -542,7 +578,7 @@ int DoWebDavServer(uint16_t port) {
             std::string send_file;
             Response res = handle_request(parser.get(), send_file);
             parser.get().body().close();
-            std::remove(kUploadFile);
+            std::remove(upload_file.c_str());
             res.set(http::field::connection, "close");
             if (send_file.empty()) {
                 res.prepare_payload();

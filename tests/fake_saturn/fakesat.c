@@ -134,6 +134,8 @@ static void handle(int cmd, const char *arg)
         up_size = (size_t)-1;
         reply(0, "", 0);
     }
+    else if (cmd == 6) /* RMDIR: FatFs f_unlink, which only removes empty directories */
+        reply(remove(path) ? 1 : 0, "", 0);
     else if (cmd == 5) /* MKDIR */
         reply(mkdir(path, 0755) ? 1 : 0, "", 0);
     else if (cmd == 7) /* RENAME "old\0new" */
