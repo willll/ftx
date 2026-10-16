@@ -100,9 +100,9 @@ void DoConsole(bool enable_stdin, bool acknowledge = false);
 int DoTcpProxy(uint16_t port = 1234, bool verbose = false);
 
 /**
- * @brief Start a WebDAV server that exposes the Saturn FAT filesystem.
+ * @brief Start a WebDAV server on 127.0.0.1 that exposes the Saturn FAT filesystem.
  * @param port TCP port to listen on (default 8080).
- * @return Exit status code.
+ * @return 0 on successful termination (Ctrl-C), 1 on critical server failure.
  */
 int DoWebDavServer(uint16_t port = 8080);
 

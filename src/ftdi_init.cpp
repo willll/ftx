@@ -35,9 +35,6 @@
 
 namespace ftdi {
 
-/**
- * @copydoc ftdi::InitComms
- */
 int InitComms(int VID, int PID, const std::string &Serial, bool recover)
 {
     CDBG_LOG_ON_CHANGE("InitComms.begin",
@@ -199,9 +196,6 @@ int InitComms(int VID, int PID, const std::string &Serial, bool recover)
     return !error;
 }
 
-/**
- * @copydoc ftdi::CloseComms
- */
 void CloseComms()
 {
     // Step 1: Log the start of the device closing process

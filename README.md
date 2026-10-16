@@ -15,7 +15,6 @@ This project provides a modern C++17 command-line utility for transferring data 
 - Download data from the device to a file
 - Upload data from a file to the device
 - Upload and execute a program on the device
-- Execute a program at a specified address
 - Debug console mode for device output
 - WebDAV server mode to mount the cartridge's FAT filesystem as a network drive
 - Recursive directory synchronization (unidirectional push, unidirectional pull, and bidirectional)
@@ -81,14 +80,20 @@ sudo apt install libboost-program-options-dev libboost-filesystem-dev libftdi1-d
 
 Then configure with `-DBUILD_STATIC=ON` as shown above.
 
-### MS Windows 
+### MS Windows
+
+Prebuilt `ftx-windows.exe` binaries are attached to each [GitHub release](https://github.com/willll/ftx/releases).
+
+To build it yourself, cross-compile from Linux (or WSL) with Docker, the way CI does. The `willll/windev-docker` image contains the MXE MinGW toolchain with Boost and libftdi:
 
 ```sh
-mkdir -p build
-cd build
-cmake ..
-cmake --build .
+docker run --rm -v "$PWD":/src -w /src willll/windev-docker:v1.0 bash -c '
+  export PATH=/opt/mxe-w64/usr/bin:$PATH &&
+  x86_64-w64-mingw32.static-cmake -S . -B buildwin -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC=ON &&
+  x86_64-w64-mingw32.static-cmake --build buildwin'
 ```
+
+This produces `buildwin/ftx.exe`. A native Windows build needs Boost (`program_options`, `filesystem`) and libftdi1 installed where CMake can find them; there is no ready-made setup for that.
 
 ### macOS (Native Apple Silicon / Intel)
 
@@ -156,13 +161,14 @@ To install the WinUSB driver:
 - `-d <file> <address> <size>`: Download data from device to file
 - `-u <file> <address>`      : Upload data from file to device
 - `-x <file> <address>`      : Upload program and execute
-- `-r <address>`             : Execute program at address
+- `-r <address>`             : Execute program at address. **Known not to work on the USB dev cart**: after `-u`, the program does not start, so `-r` reports an error. Use `-x` to upload and run.
 - `-D, --dump <file>`        : Dump the Sega Saturn BIOS to a file
 - `--ls <path>`              : List files and directories at the specified path on the target. Combine with `-l` for detailed listing with sizes and dates.
 - `--rm <path>`              : Remove a file or empty directory on the target
 - `--mkdir <path>`           : Create a directory on the target
-- `--rmdir <path>`           : Delete a directory on the target
+- `--rmdir <path>`           : Delete an empty directory on the target
 - `--cp <file> <target>`     : Copy a file to the target. `<target>` can be a FAT path (e.g., `/folder/file.bin`) or raw SD sectors (`sdraw:start:count`).
+- `--get <saturn_path> <file>`: Download a file from the target's SD card (e.g. `--get /SAVES/GAME.SAV game.sav`). The local file is only replaced once the checksum matches.
 - `--crc <file>`             : Calculate and print the CRC-8 checksum for a file on the target (the Saturn reads about 75 KB/s, so a big file takes minutes; Ctrl-C stops waiting)
 - `--lcrc <file>`            : Calculate and print the CRC-8 checksum for a local host file
 - `--sync <local> <saturn> [mode]`: Synchronize a local directory with a Sega Saturn SD card directory recursively (`mode`: `1`=local->saturn [default], `2`=saturn->local, `3`=both).
@@ -191,12 +197,6 @@ Upload and execute `prog.bin` at address 0x200000:
 
 ```sh
 ./ftx -x prog.bin 0x200000
-```
-
-Execute program at address 0x200000:
-
-```sh
-./ftx -r 0x200000
 ```
 
 Start debug console:
@@ -250,6 +250,8 @@ Bidirectional recursive folder synchronization (Mode 3: both):
 ## TCP Proxy Mode
 
 `-g` starts a raw TCP proxy. All bytes received from the TCP client are forwarded directly to the FTDI device, and all bytes read from FTDI are forwarded back to the TCP client.
+
+**Security:** the proxy listens on all network interfaces and has no authentication. While it runs, anyone who can reach the port on your network can read and write the Saturn's memory, run code on it, and send SD card commands. Only run it on a trusted network, or block the port in your firewall.
 
 Start the proxy on the default port (1234):
 
@@ -326,7 +328,7 @@ Or on a custom port:
 
 ### Debug Traces
 
-The project includes extensive debug tracing. When built in Debug mode, traces are emitted to stdout with the `[DoConsole][dbg]` prefix. Key traces include:
+Run ftx with `-vv` to print debug traces to stdout, in any build type. Console mode traces use the `[DoConsole][dbg]` prefix. Key traces include:
 
 - `stdin reader thread started/exiting` — thread lifecycle events
 - `stdin got byte=0xNN` — every byte received from terminal input
@@ -340,21 +342,6 @@ TCP proxy mode also emits traces with `[TCPProxy][dbg]`, including:
 - socket/FTDI byte counts per transfer
 - FTDI chunk write retries and flush/retry events
 
-To see these traces, build with `-DCMAKE_BUILD_TYPE=Debug`:
-
-```sh
-cmake -DCMAKE_BUILD_TYPE=Debug ..
-make
-```
-
-To build with `NDEBUG` defined, configure with `-DNDEBUG=ON`:
-
-```sh
-cmake -DNDEBUG=ON ..
-make
-```
-
-In both debug and release builds, debug traces are controlled dynamically. Use the `-v` or `-vv` flags when running `ftx` to see these logs in your terminal. Building with `NDEBUG` will disable standard C++ assertions, but will no longer silence the logger.
 
 ### Error Handling
 

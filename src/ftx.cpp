@@ -133,13 +133,14 @@ void PrintUsage(const char* progName) {
     std::cout << "  -d  <file>  <address>  <size> Download data to file\n";
     std::cout << "  -u  <file>  <address>         Upload data from file\n";
     std::cout << "  -x  <file>  <address>         Upload program and execute\n";
-    std::cout << "  -r  <address>                 Execute program (Does not work !)\n";
+    std::cout << "  -r  <address>                 Execute program (known not to work on the USB dev cart; use -x)\n";
     std::cout << "  -D, --dump <file>             Dump BIOS to file\n\n";
     std::cout << "  --ls <path>                   List files and directories\n";
     std::cout << "  --rm <path>                   Remove a file or empty directory\n";
     std::cout << "  --mkdir <path>                Create a directory\n";
-    std::cout << "  --rmdir <path>                Delete a directory\n";
+    std::cout << "  --rmdir <path>                Delete an empty directory\n";
     std::cout << "  --cp <file> <target>          Copy a file to a raw SD range (sdraw:start:count) or FAT filesystem path (/path)\n";
+    std::cout << "  --get <saturn_path> <file>    Download a file from the SD card\n";
     std::cout << "  --crc <file>                  Print CRC-8 for a file\n";
     std::cout << "  --lcrc <file>                 Print CRC-8 for a local host file\n";
     std::cout << "  --sync <local> <saturn> [mode] Synchronize local folder and Saturn SDCard folder (mode: 1=local->saturn [default], 2=saturn->local, 3=both)\n\n";
@@ -147,12 +148,12 @@ void PrintUsage(const char* progName) {
     std::cout << "  " << prog << " -d data.bin 0x200000 0x10000\n";
     std::cout << "  " << prog << " -u data.bin 0x200000\n";
     std::cout << "  " << prog << " -x prog.bin 0x200000\n";
-    std::cout << "  " << prog << " -r 0x200000\n";
     std::cout << "  " << prog << " -t\n";
     std::cout << "  " << prog << " -c\n";
-    std::cout << "  " << prog << " --ls cd/data\n";
-    std::cout << "  " << prog << " --rm old.bin\n";
-    std::cout << "  " << prog << " --crc boot.bin\n";
+    std::cout << "  " << prog << " --ls /SD_TEST\n";
+    std::cout << "  " << prog << " --get /SAVES/GAME.SAV game.sav\n";
+    std::cout << "  " << prog << " --rm /OLD.BIN\n";
+    std::cout << "  " << prog << " --crc /BOOT.BIN\n";
 }
 
 /**
@@ -228,7 +229,7 @@ CommandLineArgs parse_args(int argc, char* argv[]) {
         ("ls", po::value<std::string>()->implicit_value("/"), "List files and directories: <path>")
         ("rm", po::value<std::string>(), "Remove a file or empty directory: <path>")
         ("mkdir", po::value<std::string>(), "Create a directory: <path>")
-        ("rmdir", po::value<std::string>(), "Delete a directory: <path>")
+        ("rmdir", po::value<std::string>(), "Delete an empty directory: <path>")
         ("cp", po::value<std::vector<std::string>>()->multitoken(), "Copy: <file> <sdraw:start:count>")
         ("crc", po::value<std::string>(), "Print CRC-8 for a file: <file>")
         ("lcrc", po::value<std::string>(), "Print CRC-8 for a local file: <file>")
