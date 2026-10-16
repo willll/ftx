@@ -265,7 +265,8 @@ try:
     st, _ = http("PUT", "/BIG.BIN", body=big)
     check("WebDAV: PUT of a 1.5 MB file", st == 201 and get(sd, "BIG.BIN") == big, "status %d" % st)
     st, body = http("GET", "/BIG.BIN")
-    check("WebDAV: GET returns the file", st == 200 and body == big)
+    check("WebDAV: GET returns the file", st == 200 and body == big,
+          "status %d, %d of %d bytes, same=%s" % (st, len(body), len(big), body == big))
 
     st, _ = http("PROPFIND", "/full", {"Depth": "1"})
     check("WebDAV: listing a folder that was cut short fails", st == 500, "status %d" % st)

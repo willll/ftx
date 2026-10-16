@@ -153,7 +153,7 @@ if (WIN32)
     target_compile_options(ftx PRIVATE /std:c++17)
   endif()
   # Link against Winsock2 for socket and WSAPoll support
-  target_link_libraries(ftx PRIVATE ws2_32)
+  target_link_libraries(ftx PRIVATE ws2_32 mswsock) # mswsock: TransmitFile, used by Beast file_body
 endif()
 
 target_include_directories(ftx
