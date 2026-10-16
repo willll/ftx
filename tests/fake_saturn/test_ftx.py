@@ -262,9 +262,9 @@ try:
     check("WebDAV: COPY over an existing file", st == 204 and get(sd, "dst.sav") == b"SOURCE!!")
 
     big = os.urandom(1536 * 1024)
-    st, _ = http("PUT", "/BIG.BIN", body=big)
-    check("WebDAV: PUT of a 1.5 MB file", st == 201 and get(sd, "BIG.BIN") == big, "status %d" % st)
-    st, body = http("GET", "/BIG.BIN")
+    st, _ = http("PUT", "/LARGE.BIN", body=big)
+    check("WebDAV: PUT of a 1.5 MB file", st == 201 and get(sd, "LARGE.BIN") == big, "status %d" % st)
+    st, body = http("GET", "/LARGE.BIN")
     check("WebDAV: GET returns the file", st == 200 and body == big,
           "status %d, %d of %d bytes, same=%s" % (st, len(body), len(big), body == big))
 
