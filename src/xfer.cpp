@@ -587,9 +587,6 @@ namespace xfer
               << speed_kb_s << " KB/s" << std::endl;
   }
 
-  /**
-   * @copydoc xfer::DoBiosDump
-   */
   int DoBiosDump(const char *filename)
   {
     // Step 1: Log the start of the BIOS dump process
@@ -599,9 +596,6 @@ namespace xfer
     return DoDownload(filename, saturn::bios_address, saturn::bios_size);
   }
 
-  /**
-   * @copydoc xfer::DoList
-   */
   int DoList(const char *path)
   {
     std::string listing;
@@ -611,9 +605,6 @@ namespace xfer
   }
 
 
-  /**
-   * @copydoc xfer::DoListStr
-   */
   int DoListStr(const char *path, std::string &out_listing)
   {
     if (!SendRemoteIoCommand(RemoteIoCommand::LIST, path))
@@ -676,41 +667,26 @@ namespace xfer
     }
   }
 
-  /**
-   * @copydoc xfer::DoRemove
-   */
   int DoRemove(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::REMOVE, path, "DoRemove");
   }
 
-  /**
-   * @copydoc xfer::DoRename
-   */
   int DoRename(const char *old_path, const char *new_path)
   {
     return ExecuteRemoteIoRenameCommand(old_path, new_path, "DoRename");
   }
 
-  /**
-   * @copydoc xfer::DoMkdir
-   */
   int DoMkdir(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::MKDIR, path, "DoMkdir");
   }
 
-  /**
-   * @copydoc xfer::DoRmdir
-   */
   int DoRmdir(const char *path)
   {
     return ExecuteRemoteIoCommand(RemoteIoCommand::RMDIR, path, "DoRmdir");
   }
 
-  /**
-   * @copydoc xfer::DoCrc
-   */
   int DoCrc(const char *filename)
   {
     // The file size isn't known here, so wait for as long as the Saturn needs (Ctrl-C stops).
@@ -732,7 +708,10 @@ namespace xfer
   /**
    * @brief Run @p download into "<dst>.ftxpart" and rename it over @p dst only if it succeeds,
    * so a failed or interrupted transfer never truncates an existing file.
+   * @param dst Final local file name.
+   * @param label Prefix for error messages, e.g. "DoDownload".
    * @param download Callable taking the temporary path and returning 1 on success.
+   * @return 1 on success, 0 on error.
    */
   template <typename Download>
   static int DownloadViaPartFile(const char *dst, const char *label, Download download)
@@ -849,9 +828,6 @@ namespace xfer
     cdbg << "[DoDownload] Download complete." << std::endl;
     return 1;
   }
-  /**
-   * @copydoc xfer::DoDownload
-   */
   int DoDownload(const char *filename, uint32_t address, std::size_t size)
   {
     return DownloadViaPartFile(filename, "DoDownload", [&](const char *part) {
@@ -860,9 +836,6 @@ namespace xfer
   }
 
 
-  /**
-   * @copydoc xfer::DoUpload
-   */
   int DoUpload(const char *filename, uint32_t address, const bool execute)
   {
     std::string functnName = execute ? "DoUploadExecute" : "DoUpload";
@@ -968,9 +941,6 @@ namespace xfer
     return 1;
   }
 
-  /**
-   * @copydoc xfer::DoRun
-   */
   int DoRun(uint32_t address)
   {
     cdbg << "[DoRun] Executing at address 0x" << std::hex << address
@@ -991,13 +961,13 @@ namespace xfer
       return 0;
     }
     
-    cdbg << "[DoRun] Execute command sent successfully." << std::endl;
-    return 1;
+    // Tested on hardware: after -u, this command does not start the program, and the cart
+    // gives no answer to check. Report failure rather than a success that isn't one.
+    std::cerr << "[DoRun] Execute command sent, but on the USB dev cart it is known not to start "
+                 "the program. Use -x <file> <address> to upload and run." << std::endl;
+    return 0;
   }
 
-  /**
-   * @copydoc xfer::DoExecute
-   */
   int DoExecute(const char *filename, uint32_t address)
   {
     cdbg << "[DoExecute] Uploading and executing: file='" << filename
@@ -1016,9 +986,6 @@ namespace xfer
     }
   }
 
-  /**
-   * @copydoc xfer::DoSdUpload
-   */
   int DoSdUpload(const char *host_filename, const char *saturn_sd_path)
   {
     std::error_code ec;
@@ -1372,7 +1339,6 @@ namespace xfer
   }
 
   /**
-   * @copydoc xfer::DoSdDownload
    * @details Downloads into "<host_filename>.ftxpart" and renames it over @p host_filename
    * only once the CRC matches, so a failed transfer never truncates an existing file.
    */
@@ -1702,9 +1668,6 @@ namespace xfer
     return true;
   }
 
-  /**
-   * @copydoc xfer::DoSdSync
-   */
   int DoSdSync(const char *local_path, const char *saturn_sd_path, int mode)
   {
     namespace fs = std::filesystem;

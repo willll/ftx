@@ -18,7 +18,7 @@
  * - Cross-platform support (Linux, Windows, macOS via CMake)
  * - Recursive folder synchronization with 3 operating modes
  * - Adaptive USB write retry with chunk size backoff
- * - Deduplicating debug logger with compile-time control
+ * - Deduplicating debug logger, switched on at run time (`-v` / `-vv`)
  * - Extensive Doxygen documentation
  * - Static analysis support (cppcheck)
  *
@@ -26,13 +26,13 @@
  *
  * @subsection quickstart_building Building
  *
- * **Debug build** (with full traces):
+ * **Debug build** (no optimisation, for debugging ftx itself):
  * @code
  * cmake -DCMAKE_BUILD_TYPE=Debug ..
  * cmake --build .
  * @endcode
  *
- * **Release build** (traces compiled out):
+ * **Release build**:
  * @code
  * cmake -DCMAKE_BUILD_TYPE=Release ..
  * cmake --build .
@@ -47,7 +47,7 @@
  *
  * **TCP proxy for GDB** (with packet tracing):
  * @code
- * ./ftx -g 1234 -verbose
+ * ./ftx -g 1234 -v
  * @endcode
  *
  * **Data transfer**:
@@ -77,10 +77,9 @@
  *   - Protocol definitions for Saturn cartridge communication
  *   - Download, upload, and execute operations
  *
- * - **log** (@ref log.hpp): Debug logging with compile-time control
- *   - `cdbg` stream for debug output (no-op in Release)
+ * - **log** (@ref log.hpp): Debug logging, switched on at run time
+ *   - `cdbg` stream for debug output (printed only with `-vv`)
  *   - `CDBG_LOG_ON_CHANGE()` macro for deduplication
- *   - Conditional compilation via `NDEBUG`
  *
  * - **crc8** (@ref crc.hpp): CRC-8 checksum computation
  *   - Lookup-table based for efficiency
@@ -88,16 +87,19 @@
  *
  * @subsection arch_modes Build Modes
  *
- * - **Debug** (`-DCMAKE_BUILD_TYPE=Debug`): Full traces, no optimization
- * - **Release** (`-DCMAKE_BUILD_TYPE=Release`): Traces compiled out via `NDEBUG`
- * - **NDEBUG** (`-DNDEBUG=ON`): Force trace compilation regardless of build type
+ * - **Debug** (`-DCMAKE_BUILD_TYPE=Debug`): No optimization
+ * - **Release** (`-DCMAKE_BUILD_TYPE=Release`): Optimized
+ *
+ * Both build types contain the traces; run with `-v` (GDB packets) or `-vv` (everything) to see them.
  *
  * @section tcp_proxy TCP Proxy Mode
  *
  * The TCP proxy (`-g [port]`) forwards all bytes between TCP and FTDI:
  *
- * - **Without `-verbose`**: Silent byte forwarding (production use)
- * - **With `-verbose`**: Prints RSP packets prefixed with `GDB>` or `Target>`
+ * - **Without `-v`**: Silent byte forwarding
+ * - **With `-v`**: Prints RSP packets prefixed with `GDB>` or `Target>`
+ * - **Network**: Listens on all network interfaces with no authentication, so anyone on
+ *   your network can control the Saturn while it runs
  * - **Retry logic**: Adaptive chunk size backoff (64→32→16→1 bytes) with retry delays
  * - **Note**: Target firmware must implement RSP protocol; proxy does no synthesis
  *
@@ -107,7 +109,7 @@
  *
  * The @ref Logging "debug logging system" provides:
  *
- * - `cdbg << ...` for simple output (compiled out in Release)
+ * - `cdbg << ...` for simple output (printed only with `-vv`)
  * - `CDBG_LOG_ON_CHANGE(KEY, message)` for spam reduction
  * - Automatic thread-safe deduplication
  *
@@ -131,7 +133,7 @@
  *
  * Terminal 1 (start proxy with tracing):
  * @code
- * ./ftx -g 1234 -verbose
+ * ./ftx -g 1234 -v
  * [TCPProxy] listening on port 1234
  * @endcode
  *
@@ -153,6 +155,12 @@
  *
  * @section license License
  *
- * BSD 2-Clause License. See individual source files for attribution.\n * Original work by Anders Montonen (andersm/usbcart).\n *
- * @section see_also See Also\n *
- * - @ref ftdi.hpp - Main FTDI interface\n * - @ref xfer.hpp - Data transfer operations\n * - @ref log.hpp - Debug logging system\n */
+ * BSD 2-Clause License. See individual source files for attribution.
+ * Original work by Anders Montonen (andersm/usbcart).
+ *
+ * @section see_also See Also
+ *
+ * - @ref ftdi.hpp - Main FTDI interface
+ * - @ref xfer.hpp - Data transfer operations
+ * - @ref log.hpp - Debug logging system
+ */

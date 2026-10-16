@@ -116,7 +116,7 @@ int DoRename(const char *old_path, const char *new_path);
 int DoMkdir(const char *path);
 
 /**
- * @brief Delete a directory.
+ * @brief Delete an empty directory.
  * @param path Directory path to delete.
  * @return 1 on success, 0 on error.
  */
@@ -189,7 +189,8 @@ int DoSdSync(const char *local_path, const char *saturn_sd_path, int mode = 1);
 /**
  * @brief Send execute command to device at given address.
  * @param address Address to execute.
- * @return 1 on success, 0 on error.
+ * @return Always 0: the cart never confirms this command, and on the USB dev cart it is
+ *         known not to start the program (use DoExecute instead).
  */
 int DoRun(unsigned int address);
 
@@ -200,12 +201,5 @@ int DoRun(unsigned int address);
  * @return 1 on success, 0 on error.
  */
 int DoExecute(const char* filename, uint32_t address);
-
-/**
- * @brief Parse a numeric argument from string.
- * @param arg Input string.
- * @param result Output parsed value.
- */
-void ParseNumericArg(const char* arg, uint32_t * result);
 
 } // namespace xfer

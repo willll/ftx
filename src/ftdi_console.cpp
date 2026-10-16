@@ -49,9 +49,6 @@
 
 namespace ftdi {
 
-/**
- * @copydoc ftdi::DoConsole
- */
 void DoConsole(bool enable_stdin, bool acknowledge)
 {
     // setting std::cout to unbuffered mode
@@ -350,9 +347,6 @@ void DoConsole(bool enable_stdin, bool acknowledge)
     std::cout << "[DoConsole] Exiting debug console mode." << std::endl;
 }
 
-/**
- * @copydoc ftdi::Signal
- */
 void Signal(int sig)
 {
     // Step 1: Log the caught signal
