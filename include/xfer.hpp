@@ -131,7 +131,8 @@ int DoCrc(const char *filename);
 
 /**
  * @brief Download data from device and write to file.
- * @param filename Output file name.
+ * @param filename Output file name. Written via "<filename>.ftxpart" and replaced only
+ *        after the checksum matches, so a failed dump leaves an existing file untouched.
  * @param address Device address to read from.
  * @param size Number of bytes to download.
  * @return 1 on success, 0 on error.

@@ -376,7 +376,7 @@ The source is organized into focused modules:
 - **src/crc.cpp** — CRC-8 checksum computation
 - **src/ftdi_webdav.cpp** — WebDAV server mapping HTTP requests to cartridge file commands
 - **tests/fake_saturn/** — Hardware-free tests against a fake cartridge
-- **include/log.hpp** — Deduplicating debug logger with release-mode no-op
+- **include/log.hpp** — Deduplicating debug logger, enabled at run time with `-vv`
 
 ### Build System
 

@@ -1,9 +1,9 @@
 /**
  * @file log.hpp
- * @brief Deduplicating debug logger with conditional compilation.
+ * @brief Deduplicating debug logger, switched on at run time.
  * @details Provides `cdbg` global logger and `CDBG_LOG_ON_CHANGE` macro.
- *          In Release mode (NDEBUG defined), all debug output is compiled out.
- *          In Debug mode, output goes to stdout with deduplication support.
+ *          Output goes to stdout only when g_verbose is set (-vv), in any build type;
+ *          `CDBG_LOG_ON_CHANGE` skips a message identical to the last one for its key.
  */
 
 #pragma once
