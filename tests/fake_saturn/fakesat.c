@@ -9,6 +9,9 @@
  *   FAKE_WRITE_DELAY_US=N  sleep N microseconds in every write
  *   FAKE_ECHO_DELAY_MS=N   act as a plain target for ftx -g: echo every write back N ms later
  *   FAKE_READ_FAIL=1       every read fails, like a USB handle that died
+ *   FAKE_CRC_DELAY_MS=N    a CRC reply arrives N ms late, like a big file on the real Saturn
+ *   FAKE_STALE_CRC=1       before the first CRC reply, send one for another file (a late answer
+ *                          to an earlier request that timed out)
  *
  * Paths starting with "sdraw:" are logged as "[fakesat] RAW ..." instead of touching sectors.
  */
@@ -42,6 +45,20 @@ static long ms_until(const struct timespec *t)
 }
 
 /* Echoed bytes "arrive" in the receive buffer once their delay has passed. */
+static void deliver_echo(void);
+
+/* Move the bytes queued since out_len == from into the late-delivery buffer, due in ms. */
+static void deliver_later(size_t from, long ms)
+{
+    memcpy(echo_buf + echo_len, out + from, out_len - from);
+    echo_len += out_len - from;
+    out_len = from;
+    clock_gettime(CLOCK_MONOTONIC, &echo_ready);
+    echo_ready.tv_sec += ms / 1000;
+    echo_ready.tv_nsec += (ms % 1000) * 1000000;
+    if (echo_ready.tv_nsec >= 1000000000) { echo_ready.tv_sec++; echo_ready.tv_nsec -= 1000000000; }
+}
+
 static void deliver_echo(void)
 {
     if (echo_len && ms_until(&echo_ready) <= 0)
@@ -122,9 +139,17 @@ static void handle(int cmd, const char *arg)
     {
         size_t n = read_file(path, data, sizeof data, &ok);
         if (!ok) { reply(1, "", 0); return; }
+        static int stale_sent;
+        if (getenv("FAKE_STALE_CRC") && !stale_sent++)
+        {
+            const char stale[] = "[DoCrc] /OTHER.BIN CRC-8 = 0x00\n";
+            reply(0, stale, sizeof stale - 1);
+        }
+        size_t from = out_len;
         char text[MAX_PATH + 64];
         int len = snprintf(text, sizeof text, "[DoCrc] %s CRC-8 = 0x%02X\n", arg, crc8(data, n));
         reply(0, text, (size_t)len);
+        if (getenv("FAKE_CRC_DELAY_MS")) deliver_later(from, atol(getenv("FAKE_CRC_DELAY_MS")));
     }
     else if (cmd == 4) /* UPLOAD, then size(4) + data + crc(1) from the host, answered by one raw byte */
     {

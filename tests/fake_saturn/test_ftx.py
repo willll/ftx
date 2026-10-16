@@ -103,6 +103,24 @@ rc, _ = ftx("--sync", os.path.join(loc, "full"), "/full", "3")
 untouched = all(get(sd, "full/SAVE%02d.BIN" % i) == b"%d" % i for i in range(40))
 check("sync: a cut-short Saturn listing stops the sync", rc != 0 and untouched)
 
+# --- --crc ------------------------------------------------------------------------------
+put(sd, "c.sav", b"CRC-ME")
+_, out = ftx("--lcrc", os.path.join(sd, "c.sav"))
+want = out.strip().split(" = ")[-1]
+result_line = "[DoCrc] /c.sav CRC-8 = " + want
+rc, out = ftx("--crc", "/c.sav", FAKE_STALE_CRC=1)
+check("--crc skips a late reply for another file", rc == 0 and result_line in out, "rc %d" % rc)
+t0 = time.time()
+rc, out = ftx("--crc", "/c.sav", FAKE_CRC_DELAY_MS=15000)
+check("--crc waits for a slow answer", rc == 0 and result_line in out, "rc %d after %.0f s" % (rc, time.time() - t0))
+
+# Same-size files over 4 MB aren't checksummed in sync (the Saturn would need minutes per file).
+put(sd, "g/IMAGE.BIN", b"\x01" * (5 * 1024 * 1024))
+put(loc, "g/IMAGE.BIN", b"\x02" * (5 * 1024 * 1024))
+rc, out = ftx("--sync", os.path.join(loc, "g"), "/g", "3")
+check("sync: same-size files over 4 MB are not checksummed", rc == 0 and "cmd=3" not in out and "1 unchanged" in out)
+
+
 # --- interrupted upload ----------------------------------------------------------------
 put(loc, "prog.bin", os.urandom(512 * 1024))
 p = subprocess.Popen([FTX, "-u", os.path.join(loc, "prog.bin"), "0x6004000"],

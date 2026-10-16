@@ -126,6 +126,8 @@ int DoRmdir(const char *path);
  * @brief Compute and print the CRC-8 of a file.
  * @param filename Input file name.
  * @return 1 on success, 0 on error.
+ * @note Waits until the Saturn answers (it reads about 75 KB/s) or Ctrl-C; a late reply
+ *       for another file, left over from an earlier timed-out request, is skipped.
  */
 int DoCrc(const char *filename);
 
@@ -172,7 +174,8 @@ int DoSdDownload(const char *saturn_sd_path, const char *host_filename);
  * @param mode Sync mode: 1 = local to Saturn (default), 2 = Saturn to local, 3 = bidirectional (both).
  *
  * Modes 1 and 2 copy every file from the source side. Mode 3 copies files missing
- * on one side; for files present on both sides that differ (size, then CRC-8) the newer
+ * on one side; for files present on both sides that differ (size, then CRC-8 for files up
+ * to 4 MB; bigger same-size files are assumed identical) the newer
  * copy wins, and undecidable cases are reported as conflicts. Files written by the Saturn
  * carry SRL_HostIO's fixed no-RTC stamp and count as undecidable. A local file replaced in
  * mode 3 is kept as "<name>.ftxbak". Nothing is ever deleted;
