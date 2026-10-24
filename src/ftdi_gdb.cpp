@@ -300,6 +300,14 @@ int DoTcpProxy(uint16_t port, bool verbose)
     // A failed FTDI transfer means a dead handle (e.g. after usbreset); exiting lets callers restart us.
     bool device_failed = false;
 
+    // RSP replies are a few bytes: at the default 16 ms the chip holds each one
+    // until the timer runs out, which dominated every GDB round trip.
+    if (ftdi_set_latency_timer(&g_Device, 1) < 0)
+    {
+        std::cerr << "[TCPProxy] could not lower FTDI latency (GDB will be slower): "
+                  << ftdi_get_error_string(&g_Device) << std::endl;
+    }
+
     while (!g_interrupt_flag && !device_failed)
     {
         struct pollfd accept_poll;
@@ -359,7 +367,8 @@ int DoTcpProxy(uint16_t port, bool verbose)
             polls[0].revents = polls[1].revents = 0;
             struct pollfd& client_poll = polls[0];
 
-            const int poll_status = poll(polls, 2, 10);
+            // No wait here: ftdi_read_data() below already blocks up to the 1 ms latency timer.
+            const int poll_status = poll(polls, 2, 0);
             if (poll_status < 0)
             {
                 if (errno == EINTR)
