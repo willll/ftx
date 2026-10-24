@@ -27,6 +27,7 @@ static inline int socket_close(int s) { return close(s); }
 #include <sys/types.h>
 
 #include <cerrno>
+#include <csignal>
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -252,6 +253,10 @@ namespace ftdi {
 int DoTcpProxy(uint16_t port, bool verbose)
 {
     cdbg << "[TCPProxy][dbg] start port=" << port << " verbose=" << verbose << std::endl;
+#ifndef _WIN32
+    // A send() to a GDB that just died must fail with EPIPE, not kill the proxy.
+    signal(SIGPIPE, SIG_IGN);
+#endif
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0)
     {
@@ -413,6 +418,11 @@ int DoTcpProxy(uint16_t port, bool verbose)
                         }
                     }
                 }
+            }
+
+            if (!client_alive)
+            {
+                break; // don't forward target output to a client we just lost
             }
 
             const int ftdi_len = ftdi_read_data(&g_Device, ftdi_rx, sizeof(ftdi_rx));

@@ -194,6 +194,26 @@ except subprocess.TimeoutExpired:
 client.close()
 check("GDB proxy: exits with an error when the cartridge stops answering", rc == 1, "exit code %r" % rc)
 
+proxy, client_a = start_proxy(FAKE_ECHO_DELAY_MS=0)
+client_b = socket.create_connection(("127.0.0.1", GDB_PORT), 2)
+client_b.settimeout(2)
+try:
+    refused = client_b.recv(1) == b""  # closed by the proxy, not left waiting in the queue
+except socket.timeout:
+    refused = False
+client_b.close()
+client_a.sendall(b"$ping#00")
+answer = read_for(client_a, 1.0)
+proxy.send_signal(signal.SIGPIPE)  # what a send() to a GDB that just died raises
+time.sleep(0.3)
+alive = proxy.poll() is None
+client_a.close()
+proxy.send_signal(signal.SIGINT)
+proxy.wait(10)
+check("GDB proxy: refuses a second client at once and keeps serving the first",
+      refused and answer == b"$ping#00", "refused=%r, first got %r" % (refused, answer))
+check("GDB proxy: survives SIGPIPE", alive)
+
 
 # --- WebDAV ----------------------------------------------------------------------------
 def start_server(cwd=None, **extra):
