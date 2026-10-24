@@ -2,7 +2,7 @@
  * @file ftdi_gdb.cpp
  * @brief Implementation of TCP↔FTDI proxy server for GDB/debugger integration.
  * @details Provides transparent byte forwarding with optional RSP packet tracing,
- *          adaptive USB write retry, and robust EINTR handling.
+ *          and robust EINTR handling.
  */
 
 #include "ftdi.hpp"
@@ -12,8 +12,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #define poll WSAPoll
-typedef unsigned int useconds_t;
-static inline int usleep(useconds_t us) { Sleep((us + 999u) / 1000u); return 0; }
 static inline int socket_close(int s) { return closesocket(static_cast<SOCKET>(s)); }
 #else
 #include <arpa/inet.h>
@@ -28,7 +26,6 @@ static inline int socket_close(int s) { return close(s); }
 
 #include <cerrno>
 #include <csignal>
-#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -75,102 +72,6 @@ bool write_all_socket(int fd, const unsigned char* data, size_t len)
         }
     }
     cdbg << "[TCPProxy][dbg] socket write complete bytes=" << sent << std::endl;
-    return true;
-}
-
-/**
- * @brief Write data to FTDI device with adaptive chunking and retries.
- *
- * Implements robust USB write with the following features:
- * - Sends in chunks (initial: 64 bytes, adaptive: 32, 16, 8, 1)
- * - Up to 3 retry attempts per chunk with 1ms delay
- * - Automatic chunk size reduction on transient failures
- * - Recovery to larger chunks after successful writes
- * - Returns actual bytes written for partial-failure detection
- *
- * The chunk size backoff strategy handles transient USB bulk write failures
- * common in FTDI devices by reducing chunk size before retrying, then
- * recovering to larger chunks for throughput.
- *
- * @param[in] dev FTDI device context.
- * @param[in] data Pointer to data buffer.
- * @param[in] len Number of bytes to send.
- * @param[out] written_out If non-null, receives actual bytes written (even on failure).
- * @return true if all bytes were sent, false if write failed.
- * @note On partial failure, `written_out` contains bytes successfully written.
- * @note Generates debug traces prefixed with `[TCPProxy][dbg]`.
- * @note Calls ftdi_tcoflush() and usleep() on retries.
- */
-bool write_all_ftdi(struct ftdi_context* dev, const unsigned char* data, size_t len, size_t* written_out)
-{
-    constexpr size_t kInitialUsbChunkSize = 64;
-    constexpr int kMaxWriteRetries = 3;
-    constexpr useconds_t kRetryDelayUs = 1000;
-
-    cdbg << "[TCPProxy][dbg] ftdi write begin bytes=" << len << std::endl;
-    size_t max_chunk_size = kInitialUsbChunkSize;
-    size_t written_total = 0;
-    while (written_total < len)
-    {
-        const size_t chunk = std::min(max_chunk_size, len - written_total);
-        cdbg << "[TCPProxy][dbg] ftdi write chunk offset=" << written_total
-             << " chunk=" << chunk << std::endl;
-
-        bool wrote_chunk = false;
-        for (int attempt = 0; attempt < kMaxWriteRetries; ++attempt)
-        {
-            const int n = ftdi_write_data(dev,
-                                          const_cast<unsigned char*>(data + written_total),
-                                          static_cast<int>(chunk));
-            if (n > 0)
-            {
-                written_total += static_cast<size_t>(n);
-                wrote_chunk = true;
-                cdbg << "[TCPProxy][dbg] ftdi write chunk success n=" << n
-                     << " total=" << written_total << "/" << len << std::endl;
-                break;
-            }
-
-            // Some devices transiently fail bulk writes; purge TX and retry.
-            if (n < 0)
-            {
-                cdbg << "[TCPProxy][dbg] ftdi write failed attempt=" << (attempt + 1)
-                     << "/" << kMaxWriteRetries << " err='" << ftdi_get_error_string(dev)
-                     << "', flushing and retrying" << std::endl;
-                (void)ftdi_tcoflush(dev); // TX only: RX may hold a reply GDB still needs
-                usleep(kRetryDelayUs);
-            }
-        }
-
-        if (!wrote_chunk)
-        {
-            if (max_chunk_size > 1)
-            {
-                max_chunk_size = std::max<size_t>(1, max_chunk_size / 2);
-                cdbg << "[TCPProxy][dbg] reducing write chunk size to "
-                     << max_chunk_size << " and retrying" << std::endl;
-                continue;
-            }
-
-            cdbg << "[TCPProxy][dbg] ftdi write failed after retries at minimum chunk size" << std::endl;
-            if (written_out != nullptr)
-            {
-                *written_out = written_total;
-            }
-            return false;
-        }
-
-        // Recover chunk size after successful writes so throughput remains high.
-        if (max_chunk_size < kInitialUsbChunkSize)
-        {
-            max_chunk_size = std::min(kInitialUsbChunkSize, max_chunk_size * 2);
-        }
-    }
-    cdbg << "[TCPProxy][dbg] ftdi write complete bytes=" << written_total << std::endl;
-    if (written_out != nullptr)
-    {
-        *written_out = written_total;
-    }
     return true;
 }
 
@@ -411,19 +312,19 @@ int DoTcpProxy(uint16_t port, bool verbose)
                     {
                         cdbg << "[TCPProxy][dbg] recv from client bytes=" << recv_len << std::endl;
                         trace_rsp_stream("GDB>", gdb_trace_buffer, socket_rx, static_cast<size_t>(recv_len), verbose);
-                        size_t bytes_forwarded = 0;
-                        if (!write_all_ftdi(&g_Device, socket_rx, static_cast<size_t>(recv_len), &bytes_forwarded))
+                        // No retry: on a timeout libftdi drops the count of bytes already sent,
+                        // so resending would duplicate them; GDB's own NAK/resend recovers instead.
+                        const int sent = ftdi_write_data(&g_Device, socket_rx, static_cast<int>(recv_len));
+                        if (sent != static_cast<int>(recv_len))
                         {
-                            std::cerr << "[TCPProxy] FTDI write failed after forwarding "
-                                      << bytes_forwarded << "/" << recv_len
-                                      << " bytes: " << ftdi_get_error_string(&g_Device) << std::endl;
+                            std::cerr << "[TCPProxy] FTDI write of " << recv_len << " bytes failed: "
+                                      << ftdi_get_error_string(&g_Device) << std::endl;
                             client_alive = false;
                             device_failed = true;
                         }
                         else
                         {
-                            cdbg << "[TCPProxy][dbg] forwarded client->ftdi bytes="
-                                 << bytes_forwarded << "/" << recv_len << std::endl;
+                            cdbg << "[TCPProxy][dbg] forwarded client->ftdi bytes=" << sent << std::endl;
                         }
                     }
                 }
