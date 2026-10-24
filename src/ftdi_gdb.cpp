@@ -27,6 +27,7 @@ static inline int socket_close(int s) { return close(s); }
 #include <sys/types.h>
 
 #include <cerrno>
+#include <csignal>
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -252,6 +253,10 @@ namespace ftdi {
 int DoTcpProxy(uint16_t port, bool verbose)
 {
     cdbg << "[TCPProxy][dbg] start port=" << port << " verbose=" << verbose << std::endl;
+#ifndef _WIN32
+    // A send() to a GDB that just died must fail with EPIPE, not kill the proxy.
+    signal(SIGPIPE, SIG_IGN);
+#endif
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0)
     {
@@ -294,6 +299,14 @@ int DoTcpProxy(uint16_t port, bool verbose)
     unsigned char ftdi_rx[2048];
     // A failed FTDI transfer means a dead handle (e.g. after usbreset); exiting lets callers restart us.
     bool device_failed = false;
+
+    // RSP replies are a few bytes: at the default 16 ms the chip holds each one
+    // until the timer runs out, which dominated every GDB round trip.
+    if (ftdi_set_latency_timer(&g_Device, 1) < 0)
+    {
+        std::cerr << "[TCPProxy] could not lower FTDI latency (GDB will be slower): "
+                  << ftdi_get_error_string(&g_Device) << std::endl;
+    }
 
     while (!g_interrupt_flag && !device_failed)
     {
@@ -345,12 +358,17 @@ int DoTcpProxy(uint16_t port, bool verbose)
         bool client_alive = !device_failed;
         while (client_alive && !g_interrupt_flag)
         {
-            struct pollfd client_poll;
-            client_poll.fd = client_fd;
-            client_poll.events = POLLIN;
-            client_poll.revents = 0;
+            // [1] watches for a second client: it is refused at once instead of waiting
+            // unanswered in the listen queue, then flooding the target with stale retries.
+            struct pollfd polls[2];
+            polls[0].fd = client_fd;
+            polls[1].fd = listen_fd;
+            polls[0].events = polls[1].events = POLLIN;
+            polls[0].revents = polls[1].revents = 0;
+            struct pollfd& client_poll = polls[0];
 
-            const int poll_status = poll(&client_poll, 1, 10);
+            // No wait here: ftdi_read_data() below already blocks up to the 1 ms latency timer.
+            const int poll_status = poll(polls, 2, 0);
             if (poll_status < 0)
             {
                 if (errno == EINTR)
@@ -363,7 +381,17 @@ int DoTcpProxy(uint16_t port, bool verbose)
                 break;
             }
 
-            if (poll_status > 0)
+            if ((polls[1].revents & POLLIN) != 0)
+            {
+                const int extra_fd = accept(listen_fd, nullptr, nullptr);
+                if (extra_fd >= 0)
+                {
+                    socket_close(extra_fd);
+                    std::cerr << "[TCPProxy] refused a second client: one GDB at a time" << std::endl;
+                }
+            }
+
+            if ((client_poll.revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)) != 0)
             {
                 if ((client_poll.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
                 {
@@ -399,6 +427,11 @@ int DoTcpProxy(uint16_t port, bool verbose)
                         }
                     }
                 }
+            }
+
+            if (!client_alive)
+            {
+                break; // don't forward target output to a client we just lost
             }
 
             const int ftdi_len = ftdi_read_data(&g_Device, ftdi_rx, sizeof(ftdi_rx));
