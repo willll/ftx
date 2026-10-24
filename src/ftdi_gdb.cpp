@@ -345,12 +345,16 @@ int DoTcpProxy(uint16_t port, bool verbose)
         bool client_alive = !device_failed;
         while (client_alive && !g_interrupt_flag)
         {
-            struct pollfd client_poll;
-            client_poll.fd = client_fd;
-            client_poll.events = POLLIN;
-            client_poll.revents = 0;
+            // [1] watches for a second client: it is refused at once instead of waiting
+            // unanswered in the listen queue, then flooding the target with stale retries.
+            struct pollfd polls[2];
+            polls[0].fd = client_fd;
+            polls[1].fd = listen_fd;
+            polls[0].events = polls[1].events = POLLIN;
+            polls[0].revents = polls[1].revents = 0;
+            struct pollfd& client_poll = polls[0];
 
-            const int poll_status = poll(&client_poll, 1, 10);
+            const int poll_status = poll(polls, 2, 10);
             if (poll_status < 0)
             {
                 if (errno == EINTR)
@@ -363,7 +367,17 @@ int DoTcpProxy(uint16_t port, bool verbose)
                 break;
             }
 
-            if (poll_status > 0)
+            if ((polls[1].revents & POLLIN) != 0)
+            {
+                const int extra_fd = accept(listen_fd, nullptr, nullptr);
+                if (extra_fd >= 0)
+                {
+                    socket_close(extra_fd);
+                    std::cerr << "[TCPProxy] refused a second client: one GDB at a time" << std::endl;
+                }
+            }
+
+            if ((client_poll.revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)) != 0)
             {
                 if ((client_poll.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
                 {
