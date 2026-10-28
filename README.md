@@ -340,7 +340,6 @@ TCP proxy mode also emits traces with `[TCPProxy][dbg]`, including:
 
 - client connect/disconnect and file descriptors
 - socket/FTDI byte counts per transfer
-- FTDI chunk write retries and flush/retry events
 
 
 ### Error Handling
@@ -460,7 +459,6 @@ Core public API:
 Internal helper functions (TCP proxy implementation):
 
 - `write_all_socket()` — TCP socket writes with EINTR handling
-- `write_all_ftdi()` — FTDI writes with adaptive chunking/retry
 - `trace_rsp_stream()` — RSP packet parsing and output
 
 ## License
